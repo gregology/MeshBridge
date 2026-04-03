@@ -1,0 +1,51 @@
+# MeshBridge Configuration
+# Copy this file and edit for your setup:
+#   cp config.example.yaml config.yaml
+# Or run the setup wizard:
+#   meshbridge setup
+
+device:
+  # Serial port for the MeshCore USB Companion device.
+  # Find yours with: ls -la /dev/serial/by-id/
+  serial_port: "/dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if00-port0"
+  baudrate: 115200
+
+mqtt:
+  broker: "127.0.0.1"
+  port: 1883
+  username: "meshbridge"
+  password: "changeme"
+  # Topic prefix for all MQTT messages. Change this if running multiple
+  # bridges on the same MQTT broker.
+  topic_prefix: "meshbridge"
+
+logging:
+  # DEBUG, INFO, WARNING, ERROR
+  level: "INFO"
+  # Log file path, or null for stdout only
+  file: null
+
+plugins:
+  discord:
+    enabled: true
+    # Create a webhook: Server Settings > Integrations > Webhooks
+    webhook_url: "https://discord.com/api/webhooks/YOUR_WEBHOOK_ID/YOUR_WEBHOOK_TOKEN"
+    # Display name for messages posted to Discord
+    bot_username: "MeshBridge"
+    # Optional avatar URL for the webhook bot
+    avatar_url: ""
+    # Show metadata (hops, channel, sender key) in Discord embeds
+    include_metadata: true
+    # Which mesh channels to forward (empty list = all channels)
+    channels: [0]
+    # Which event types to forward to Discord
+    event_types:
+      - CHANNEL_MESSAGE
+      - CONTACT_MESSAGE
+
+    # --- Future: Discord Bot mode (bidirectional) ---
+    # Uncomment and configure to enable Discord-to-mesh messaging.
+    # Requires: pip install meshbridge[discord-bot]
+    # bot_token: ""
+    # guild_id: ""
+    # channel_id: ""

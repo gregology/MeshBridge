@@ -1,0 +1,64 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "meshbridge"
+version = "0.1.0"
+description = "Bridge MeshCore mesh radio devices to Discord, MQTT, and beyond"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+authors = [
+    { name = "Gregory Clarke" },
+]
+keywords = ["meshcore", "lora", "mesh", "discord", "mqtt", "bridge"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Communications",
+]
+
+dependencies = [
+    "meshcore>=2.2.0",
+    "paho-mqtt>=2.0.0",
+    "pyyaml>=6.0",
+    "aiohttp>=3.9.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "pytest-cov>=5.0",
+    "ruff>=0.4",
+]
+discord-bot = [
+    "discord.py>=2.3",
+]
+
+[project.scripts]
+meshbridge = "meshbridge.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/gregology/MeshBridge"
+Repository = "https://github.com/gregology/MeshBridge"
+Issues = "https://github.com/gregology/MeshBridge/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/meshbridge"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
