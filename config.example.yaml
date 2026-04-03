@@ -43,9 +43,12 @@ plugins:
       - CHANNEL_MESSAGE
       - CONTACT_MESSAGE
 
-    # --- Future: Discord Bot mode (bidirectional) ---
-    # Uncomment and configure to enable Discord-to-mesh messaging.
+    # --- Discord Bot mode (bidirectional) ---
+    # Enable to receive messages FROM Discord (e.g. ping/pong).
     # Requires: pip install meshbridge[discord-bot]
     # bot_token: ""
-    # guild_id: ""
-    # channel_id: ""
+    # bot_channel_id: ""
+
+  ping:
+    # Responds with "pong" when someone sends "ping", "radio check", etc.
+    enabled: true

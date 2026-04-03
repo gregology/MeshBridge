@@ -23,6 +23,7 @@ _MC_EVENT_MAP: dict[MCEventType, EventType] = {
 # Serializable fields on MeshEvent (excluding event_type and timestamp which
 # are always included).
 _SERIALIZE_FIELDS = (
+    "source",
     "text",
     "channel",
     "sender_name",

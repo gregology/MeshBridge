@@ -51,6 +51,9 @@ class MeshEvent:
     event_type: EventType
     timestamp: float = field(default_factory=time.time)
 
+    # Origin: "mesh", "discord", "slack", etc.
+    source: str = "mesh"
+
     # Message fields (CHANNEL_MESSAGE, CONTACT_MESSAGE)
     text: str | None = None
     channel: int | None = None

@@ -55,6 +55,14 @@ class BasePlugin(ABC):
             source_plugin=self.plugin_name,
         )
 
+    async def broadcast(self, text: str, channel: int = 0) -> None:
+        """Send a message to mesh AND all connected platforms (Discord, etc)."""
+        await self._app.broadcast(
+            text=text,
+            channel=channel,
+            source_plugin=self.plugin_name,
+        )
+
     async def send_direct_to_mesh(self, text: str, contact_name: str) -> None:
         """Send a direct message to a specific mesh contact."""
         await self._app.send_direct_to_mesh(

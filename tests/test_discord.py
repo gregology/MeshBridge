@@ -36,7 +36,7 @@ def discord_plugin(mock_app, discord_config):
 def test_plugin_metadata(discord_plugin):
     """Plugin has correct name and version."""
     assert discord_plugin.plugin_name == "discord"
-    assert discord_plugin.plugin_version == "0.1.0"
+    assert discord_plugin.plugin_version == "0.2.0"
 
 
 @pytest.mark.asyncio

@@ -1,7 +1,8 @@
-"""Discord webhook plugin for MeshBridge."""
+"""Discord plugin for MeshBridge (webhook + bot mode)."""
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 import aiohttp
@@ -13,14 +14,15 @@ from meshbridge.plugins import register_plugin
 
 @register_plugin
 class DiscordPlugin(BasePlugin):
-    """Forward mesh events to Discord via webhook.
+    """Bidirectional Discord integration.
 
-    Current: Webhook mode (mesh -> Discord, unidirectional).
-    Future:  Bot mode (bidirectional, Discord -> mesh via discord.py).
+    Webhook mode: mesh/bridge events -> Discord (via webhook URL).
+    Bot mode:     Discord messages -> dispatch into MeshBridge event pipeline.
+    Both modes can run simultaneously.
     """
 
     plugin_name = "discord"
-    plugin_version = "0.1.0"
+    plugin_version = "0.2.0"
 
     def __init__(self, app, config: dict) -> None:
         super().__init__(app, config)
@@ -34,6 +36,14 @@ class DiscordPlugin(BasePlugin):
         )
         self._session: aiohttp.ClientSession | None = None
 
+        # Bot mode
+        self._bot_token: str = config.get("bot_token", "")
+        self._bot_channel_id: int | None = (
+            int(config["bot_channel_id"]) if config.get("bot_channel_id") else None
+        )
+        self._bot_client: Any = None  # discord.Client, lazy-imported
+        self._bot_task: asyncio.Task | None = None
+
     async def start(self) -> None:
         self._session = aiohttp.ClientSession()
         if self._webhook_url:
@@ -41,13 +51,23 @@ class DiscordPlugin(BasePlugin):
         else:
             self._logger.warning("Discord plugin enabled but no webhook_url configured")
 
+        if self._bot_token and self._bot_channel_id:
+            self._bot_task = asyncio.create_task(self._start_bot())
+        elif self._bot_token:
+            self._logger.warning("bot_token set but bot_channel_id missing, skipping bot mode")
+
     async def stop(self) -> None:
+        if self._bot_client and not self._bot_client.is_closed():
+            await self._bot_client.close()
+        if self._bot_task:
+            self._bot_task.cancel()
+            self._bot_task = None
         if self._session:
             await self._session.close()
             self._session = None
 
     async def on_mesh_event(self, event: MeshEvent) -> None:
-        """Forward matching mesh events to Discord."""
+        """Forward matching events to Discord."""
         if event.event_type.name not in self._event_types:
             return
         if self._channels and event.channel is not None and event.channel not in self._channels:
@@ -56,6 +76,53 @@ class DiscordPlugin(BasePlugin):
             return
         if self._webhook_url and self._session:
             await self._post_webhook(event)
+
+    # -- Bot mode --
+
+    async def _start_bot(self) -> None:
+        """Start the discord.py bot client."""
+        try:
+            import discord
+        except ImportError:
+            self._logger.error(
+                "discord.py is required for bot mode: pip install meshbridge[discord-bot]"
+            )
+            return
+
+        intents = discord.Intents.default()
+        intents.message_content = True
+        self._bot_client = discord.Client(intents=intents)
+
+        plugin = self  # capture for closure
+
+        @self._bot_client.event
+        async def on_ready():
+            plugin._logger.info("Discord bot connected as %s", plugin._bot_client.user)
+
+        @self._bot_client.event
+        async def on_message(message):
+            # Ignore our own messages
+            if message.author == plugin._bot_client.user:
+                return
+            # Only listen to the configured channel
+            if message.channel.id != plugin._bot_channel_id:
+                return
+
+            event = MeshEvent(
+                event_type=EventType.CHANNEL_MESSAGE,
+                source="discord",
+                text=message.content,
+                channel=0,
+                sender_name=message.author.display_name,
+                source_plugin=plugin.plugin_name,
+            )
+            await plugin._app.dispatch_event(event)
+
+        self._logger.info("Starting Discord bot...")
+        try:
+            await self._bot_client.start(self._bot_token)
+        except Exception:
+            self._logger.exception("Discord bot failed")
 
     async def _post_webhook(self, event: MeshEvent) -> None:
         """Post a mesh event to Discord via webhook."""
