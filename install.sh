@@ -124,7 +124,7 @@ fi
 
 if [[ ! -f "$CONFIG_FILE" ]]; then
     info "Running setup wizard..."
-    MESHBRIDGE_MQTT_PASS="$MQTT_PASS" "$VENV_DIR/bin/meshbridge" -c "$CONFIG_FILE" setup
+    MESHBRIDGE_MQTT_PASS="$MQTT_PASS" "$VENV_DIR/bin/meshbridge" setup -c "$CONFIG_FILE"
 else
     warn "Config already exists at $CONFIG_FILE, skipping wizard"
 fi

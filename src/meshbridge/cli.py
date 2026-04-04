@@ -13,21 +13,18 @@ def main() -> None:
         prog="meshbridge",
         description="MeshBridge: bridge MeshCore mesh radios to Discord and beyond",
     )
-    parser.add_argument(
-        "-c",
-        "--config",
-        default=None,
-        help="Path to config.yaml (default: auto-detect)",
-    )
 
     subparsers = parser.add_subparsers(dest="command")
 
+    config_arg = argparse.ArgumentParser(add_help=False)
+    config_arg.add_argument("-c", "--config", default=None, help="Path to config.yaml")
+
     # meshbridge run
-    run_parser = subparsers.add_parser("run", help="Start the MeshBridge service")
+    run_parser = subparsers.add_parser("run", parents=[config_arg], help="Start the MeshBridge service")
     run_parser.add_argument("--debug", action="store_true", help="Enable debug logging")
 
     # meshbridge setup
-    subparsers.add_parser("setup", help="Interactive setup wizard")
+    subparsers.add_parser("setup", parents=[config_arg], help="Interactive setup wizard")
 
     # meshbridge status
     subparsers.add_parser("status", help="Show bridge service status")
