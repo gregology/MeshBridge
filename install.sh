@@ -87,16 +87,30 @@ if [[ ! -f "$MOSQUITTO_CONF" ]]; then
     info "Configuring Mosquitto..."
     MQTT_PASS=$(openssl rand -base64 12)
 
-    cat > "$MOSQUITTO_CONF" <<EOF
+    # Check if mosquitto.conf already has a password_file directive
+    EXISTING_PASSFILE=$(grep -s '^password_file' /etc/mosquitto/mosquitto.conf | tail -1 | awk '{print $2}')
+
+    if [[ -n "$EXISTING_PASSFILE" ]]; then
+        # Use the existing password file — don't add a duplicate directive
+        MQTT_PASSFILE="$EXISTING_PASSFILE"
+        cat > "$MOSQUITTO_CONF" <<EOF
 # MeshBridge MQTT configuration (auto-generated)
 listener 1883 127.0.0.1
 allow_anonymous false
-password_file /etc/mosquitto/meshbridge_passwd
 EOF
+    else
+        MQTT_PASSFILE="/etc/mosquitto/meshbridge_passwd"
+        cat > "$MOSQUITTO_CONF" <<EOF
+# MeshBridge MQTT configuration (auto-generated)
+listener 1883 127.0.0.1
+allow_anonymous false
+password_file $MQTT_PASSFILE
+EOF
+    fi
 
-    mosquitto_passwd -b -c /etc/mosquitto/meshbridge_passwd meshbridge "$MQTT_PASS"
-    chown mosquitto:mosquitto /etc/mosquitto/meshbridge_passwd
-    chmod 600 /etc/mosquitto/meshbridge_passwd
+    mosquitto_passwd -b -c "$MQTT_PASSFILE" meshbridge "$MQTT_PASS"
+    chown mosquitto:mosquitto "$MQTT_PASSFILE"
+    chmod 600 "$MQTT_PASSFILE"
     systemctl restart mosquitto
     info "Mosquitto configured (listening on 127.0.0.1:1883)"
 else
