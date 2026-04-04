@@ -140,8 +140,8 @@ def bridge():
 
 
 @pytest.mark.asyncio
-async def test_start_sets_device_name_when_configured():
-    """Bridge calls set_name on startup when device.name is configured."""
+async def test_start_sets_device_name_and_advertises_when_configured():
+    """Bridge calls set_name + send_advert on startup when device.name is configured."""
     config = {
         "device": {"serial_port": "/dev/ttyUSB0", "name": "RELAY-01"},
         "mqtt": {"topic_prefix": "meshbridge"},
@@ -157,6 +157,7 @@ async def test_start_sets_device_name_when_configured():
         await b.start()
 
     mc.commands.set_name.assert_awaited_once_with("RELAY-01")
+    mc.commands.send_advert.assert_awaited_once()
 
 
 @pytest.mark.asyncio

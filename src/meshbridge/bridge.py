@@ -60,12 +60,14 @@ class Bridge:
         self._mc = await MeshCore.create_serial(serial_port, baudrate=baudrate)
         logger.info("Connected: device=%s", self._mc.self_info.get("name", "unknown"))
 
-        # Optionally set the radio device name from config
+        # Optionally set the radio device name from config and advertise
+        # so other nodes on the mesh learn the name.
         device_name = self._config["device"].get("name")
         if device_name:
             try:
                 await self._mc.commands.set_name(device_name)
-                logger.info("Set device name to: %s", device_name)
+                await self._mc.commands.send_advert()
+                logger.info("Set device name to '%s' and sent advertisement", device_name)
             except Exception:
                 logger.exception("Failed to set device name to '%s'", device_name)
 
