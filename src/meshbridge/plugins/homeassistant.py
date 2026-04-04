@@ -51,6 +51,14 @@ class _StateFormatter(string.Formatter):
         except (KeyError, TypeError, AttributeError):
             return (f"<{field_name}?>", field_name)
 
+    def format_field(self, value, format_spec):
+        if format_spec and isinstance(value, str):
+            try:
+                value = float(value)
+            except (ValueError, TypeError):
+                format_spec = ""
+        return super().format_field(value, format_spec)
+
 
 _formatter = _StateFormatter()
 

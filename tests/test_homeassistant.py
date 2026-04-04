@@ -231,6 +231,20 @@ def test_format_nested_attributes():
     assert result == "sunny — 72°F"
 
 
+def test_format_numeric_rounding():
+    context = {"pm25": {"state": "8.60000038146973", "attributes": {"unit_of_measurement": "µg/m³"}}}
+    result = HomeAssistantPlugin._format_response(
+        "PM2.5: {pm25[state]:.1f}{pm25[attributes][unit_of_measurement]}", context
+    )
+    assert result == "PM2.5: 8.6µg/m³"
+
+
+def test_format_spec_on_non_numeric_string():
+    context = {"t": {"state": "sunny", "attributes": {}}}
+    result = HomeAssistantPlugin._format_response("{t[state]:.1f}", context)
+    assert "sunny" in result
+
+
 def test_format_missing_key_graceful():
     context = {"t": {"state": "sunny", "attributes": {}}}
     result = HomeAssistantPlugin._format_response("{t[state]} {t[attributes][missing]}", context)
