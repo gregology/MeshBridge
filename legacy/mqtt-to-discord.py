@@ -8,7 +8,7 @@ MQTT_USER = "user"
 MQTT_PASS = "password"
 MQTT_TOPIC = "meshcore/BOQ/channel/0"
 
-DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1468443751591448747/jS-VVl6UImT35C6L9MHAHdc0YpYU0jONc57-56JCCHz0ZWDUcmV1ViNVf4vJ_fyaIw4M"
+DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/..."
 
 def on_connect(client, userdata, flags, reason_code, properties):
     print(f"✓ Connected to MQTT broker")

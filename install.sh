@@ -87,32 +87,35 @@ if [[ ! -f "$MOSQUITTO_CONF" ]]; then
     info "Configuring Mosquitto..."
     MQTT_PASS=$(openssl rand -base64 12)
 
-    # Check if mosquitto.conf already has a password_file directive
-    EXISTING_PASSFILE=$(grep -s '^password_file' /etc/mosquitto/mosquitto.conf | tail -1 | awk '{print $2}')
+    # Detect existing Mosquitto config to avoid duplicate directives
+    MAIN_CONF="/etc/mosquitto/mosquitto.conf"
+    EXISTING_PASSFILE=$(grep -s '^password_file' "$MAIN_CONF" | tail -1 | awk '{print $2}')
+    HAS_LISTENER=$(grep -qs '^listener' "$MAIN_CONF" && echo "yes" || echo "")
+    HAS_ANON=$(grep -qs '^allow_anonymous' "$MAIN_CONF" && echo "yes" || echo "")
 
     if [[ -n "$EXISTING_PASSFILE" ]]; then
-        # Use the existing password file — don't add a duplicate directive
+        # Append meshbridge user to existing password file
         MQTT_PASSFILE="$EXISTING_PASSFILE"
-        cat > "$MOSQUITTO_CONF" <<EOF
-# MeshBridge MQTT configuration (auto-generated)
-listener 1883 127.0.0.1
-allow_anonymous false
-EOF
+        PASSWD_CREATE_FLAG="-b"
     else
+        # Create a new password file
         MQTT_PASSFILE="/etc/mosquitto/meshbridge_passwd"
-        cat > "$MOSQUITTO_CONF" <<EOF
-# MeshBridge MQTT configuration (auto-generated)
-listener 1883 127.0.0.1
-allow_anonymous false
-password_file $MQTT_PASSFILE
-EOF
+        PASSWD_CREATE_FLAG="-b -c"
     fi
 
-    mosquitto_passwd -b -c "$MQTT_PASSFILE" meshbridge "$MQTT_PASS"
+    # Only write directives that aren't already in mosquitto.conf
+    {
+        echo "# MeshBridge MQTT configuration (auto-generated)"
+        [[ -z "$HAS_LISTENER" ]] && echo "listener 1883 127.0.0.1"
+        [[ -z "$HAS_ANON" ]] && echo "allow_anonymous false"
+        [[ -z "$EXISTING_PASSFILE" ]] && echo "password_file $MQTT_PASSFILE"
+    } > "$MOSQUITTO_CONF"
+
+    mosquitto_passwd $PASSWD_CREATE_FLAG "$MQTT_PASSFILE" meshbridge "$MQTT_PASS"
     chown mosquitto:mosquitto "$MQTT_PASSFILE"
     chmod 600 "$MQTT_PASSFILE"
     systemctl restart mosquitto
-    info "Mosquitto configured (listening on 127.0.0.1:1883)"
+    info "Mosquitto configured (user added to $MQTT_PASSFILE)"
 else
     warn "Mosquitto already configured, skipping"
 fi
