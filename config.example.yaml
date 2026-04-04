@@ -68,19 +68,24 @@ plugins:
     url: "http://homeassistant.local:8123"
     # Long-lived access token (create in HA: Profile > Security > Long-Lived Access Tokens)
     token: "YOUR_LONG_LIVED_ACCESS_TOKEN"
-    # Each command maps a regex pattern to a Home Assistant entity.
-    # First matching command wins. Response templates use HA state fields:
-    #   {state}                  - entity state value
-    #   {attributes[key]}       - entity attribute (e.g. temperature, unit_of_measurement)
-    #   {entity_id}             - the entity ID
-    #   {last_changed}          - last state change timestamp
+    # Each command maps a regex pattern to one or more HA entities.
+    # First matching command wins. Response templates reference entities
+    # by name:  {name[state]}, {name[attributes][key]}
     commands:
       - pattern: "(?i)^\\s*(weather|forecast)\\s*$"
-        entity_id: "weather.home"
-        response: "{state} — {attributes[temperature]}°{attributes[temperature_unit]}"
+        entities:
+          weather: "weather.home"
+        response: "{weather[state]} — {weather[attributes][temperature]}°{weather[attributes][temperature_unit]}"
       - pattern: "(?i)^\\s*(temp|temperature)\\s*$"
-        entity_id: "sensor.outdoor_temperature"
-        response: "Temp: {state}°{attributes[unit_of_measurement]}"
+        entities:
+          temp: "sensor.outdoor_temperature"
+        response: "Temp: {temp[state]}°{temp[attributes][unit_of_measurement]}"
       - pattern: "(?i)^\\s*humidity\\s*$"
-        entity_id: "sensor.outdoor_humidity"
-        response: "Humidity: {state}{attributes[unit_of_measurement]}"
+        entities:
+          humidity: "sensor.outdoor_humidity"
+        response: "Humidity: {humidity[state]}{humidity[attributes][unit_of_measurement]}"
+      - pattern: "(?i)^\\s*(air quality|aqi|particulate)\\s*$"
+        entities:
+          pm25: "sensor.particulate_matter_2_5"
+          pm10: "sensor.particulate_matter_10"
+        response: "Air: PM2.5 {pm25[state]}{pm25[attributes][unit_of_measurement]} | PM10 {pm10[state]}{pm10[attributes][unit_of_measurement]}"

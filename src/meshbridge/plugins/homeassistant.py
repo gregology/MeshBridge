@@ -23,7 +23,7 @@ class Command:
     """A compiled regex -> HA entity mapping."""
 
     pattern: re.Pattern[str]
-    entity_id: str
+    entities: dict[str, str]
     response: str
 
 
@@ -76,7 +76,7 @@ class HomeAssistantPlugin(BasePlugin):
             self._commands.append(
                 Command(
                     pattern=re.compile(cmd["pattern"]),
-                    entity_id=cmd["entity_id"],
+                    entities=cmd["entities"],
                     response=cmd.get("response", "{state}"),
                 )
             )
@@ -105,15 +105,23 @@ class HomeAssistantPlugin(BasePlugin):
 
         for cmd in self._commands:
             if cmd.pattern.search(event.text):
-                state = await self._get_state(cmd.entity_id)
-                if state is None:
-                    self._logger.warning(
-                        "Failed to fetch entity %s", cmd.entity_id
-                    )
+                context = await self._fetch_entities(cmd.entities)
+                if context is None:
                     return
-                reply = self._format_response(cmd.response, state)
+                reply = self._format_response(cmd.response, context)
                 await self.broadcast(reply, channel=event.channel or 0)
                 return  # first match wins
+
+    async def _fetch_entities(self, entities: dict[str, str]) -> dict[str, Any] | None:
+        """Fetch multiple entity states and return as a named dict."""
+        context: dict[str, Any] = {}
+        for name, entity_id in entities.items():
+            state = await self._get_state(entity_id)
+            if state is None:
+                self._logger.warning("Failed to fetch entity %s", entity_id)
+                return None
+            context[name] = state
+        return context
 
     async def _get_state(self, entity_id: str) -> dict[str, Any] | None:
         """Fetch entity state from the Home Assistant REST API."""
