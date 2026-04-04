@@ -4,11 +4,20 @@
 # Or run the setup wizard:
 #   meshbridge setup
 
+bridge:
+  # Display name used when the bridge itself originates messages
+  # (e.g. ping/pong responses shown on Discord). Defaults to "MeshBridge".
+  display_name: "MeshBridge"
+
 device:
   # Serial port for the MeshCore USB Companion device.
   # Find yours with: ls -la /dev/serial/by-id/
   serial_port: "/dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if00-port0"
   baudrate: 115200
+  # Optional: Set the MeshCore radio device name on startup. Other nodes on
+  # the mesh will see this name. If omitted, the existing device name is
+  # left unchanged.
+  # name: "MeshBridge"
 
 mqtt:
   broker: "127.0.0.1"

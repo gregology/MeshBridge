@@ -1,7 +1,7 @@
 """Tests for the bridge module."""
 
 import json
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -134,6 +134,49 @@ def bridge():
     mc.commands = AsyncMock()
     b._mc = mc
     return b
+
+
+# -- Device name on startup --
+
+
+@pytest.mark.asyncio
+async def test_start_sets_device_name_when_configured():
+    """Bridge calls set_name on startup when device.name is configured."""
+    config = {
+        "device": {"serial_port": "/dev/ttyUSB0", "name": "RELAY-01"},
+        "mqtt": {"topic_prefix": "meshbridge"},
+    }
+    mqtt = AsyncMock()
+    b = Bridge(config, mqtt)
+
+    mc = AsyncMock()
+    mc.self_info = {"name": "old"}
+    mc.commands = AsyncMock()
+
+    with patch("meshbridge.bridge.MeshCore.create_serial", return_value=mc):
+        await b.start()
+
+    mc.commands.set_name.assert_awaited_once_with("RELAY-01")
+
+
+@pytest.mark.asyncio
+async def test_start_skips_set_name_when_not_configured():
+    """Bridge does not call set_name when device.name is absent."""
+    config = {
+        "device": {"serial_port": "/dev/ttyUSB0"},
+        "mqtt": {"topic_prefix": "meshbridge"},
+    }
+    mqtt = AsyncMock()
+    b = Bridge(config, mqtt)
+
+    mc = AsyncMock()
+    mc.self_info = {"name": "existing"}
+    mc.commands = AsyncMock()
+
+    with patch("meshbridge.bridge.MeshCore.create_serial", return_value=mc):
+        await b.start()
+
+    mc.commands.set_name.assert_not_awaited()
 
 
 @pytest.mark.asyncio

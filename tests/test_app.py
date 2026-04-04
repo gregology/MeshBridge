@@ -83,6 +83,34 @@ async def test_broadcast_sends_to_mesh_and_dispatches(app):
     assert event.channel == 2
 
 
+# -- display_name --
+
+
+def test_display_name_defaults_to_meshbridge(app):
+    """display_name defaults to 'MeshBridge' when bridge section is absent."""
+    assert app.display_name == "MeshBridge"
+
+
+def test_display_name_from_config(app):
+    """display_name reads from bridge.display_name config."""
+    app._config["bridge"] = {"display_name": "MyRelay"}
+    assert app.display_name == "MyRelay"
+
+
+@pytest.mark.asyncio
+async def test_broadcast_sets_sender_name_from_display_name(app):
+    """broadcast() sets sender_name to display_name on the dispatched event."""
+    app._config["bridge"] = {"display_name": "RELAY-01"}
+    plugin = AsyncMock()
+    plugin.plugin_name = "test"
+    app._plugins = [plugin]
+
+    await app.broadcast("pong", channel=0, source_plugin="ping")
+
+    event = plugin.on_mesh_event.call_args.args[0]
+    assert event.sender_name == "RELAY-01"
+
+
 # -- send_to_mesh --
 
 

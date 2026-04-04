@@ -100,6 +100,11 @@ class App:
                     "Plugin %s failed handling %s", plugin.plugin_name, event.event_type.name
                 )
 
+    @property
+    def display_name(self) -> str:
+        """Bridge display name used as sender for bridge-originated messages."""
+        return self._config.get("bridge", {}).get("display_name", "MeshBridge")
+
     async def broadcast(self, text: str, channel: int = 0, source_plugin: str = "") -> None:
         """Send a message to mesh AND dispatch to all plugins.
 
@@ -115,6 +120,7 @@ class App:
             text=text,
             channel=channel,
             source_plugin=source_plugin,
+            sender_name=self.display_name,
         )
         await self.dispatch_event(event)
 

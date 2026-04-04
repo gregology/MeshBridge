@@ -60,6 +60,15 @@ class Bridge:
         self._mc = await MeshCore.create_serial(serial_port, baudrate=baudrate)
         logger.info("Connected: device=%s", self._mc.self_info.get("name", "unknown"))
 
+        # Optionally set the radio device name from config
+        device_name = self._config["device"].get("name")
+        if device_name:
+            try:
+                await self._mc.commands.set_name(device_name)
+                logger.info("Set device name to: %s", device_name)
+            except Exception:
+                logger.exception("Failed to set device name to '%s'", device_name)
+
         # Subscribe to inbound meshcore events
         for mc_event_type in _MC_EVENT_MAP:
             self._mc.subscribe(mc_event_type, self._on_meshcore_event)
