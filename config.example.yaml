@@ -61,3 +61,26 @@ plugins:
   ping:
     # Responds with "pong" when someone sends "ping", "radio check", etc.
     enabled: true
+
+  homeassistant:
+    enabled: false
+    # Home Assistant base URL
+    url: "http://homeassistant.local:8123"
+    # Long-lived access token (create in HA: Profile > Security > Long-Lived Access Tokens)
+    token: "YOUR_LONG_LIVED_ACCESS_TOKEN"
+    # Each command maps a regex pattern to a Home Assistant entity.
+    # First matching command wins. Response templates use HA state fields:
+    #   {state}                  - entity state value
+    #   {attributes[key]}       - entity attribute (e.g. temperature, unit_of_measurement)
+    #   {entity_id}             - the entity ID
+    #   {last_changed}          - last state change timestamp
+    commands:
+      - pattern: "(?i)^\\s*(weather|forecast)\\s*$"
+        entity_id: "weather.home"
+        response: "{state} — {attributes[temperature]}°{attributes[temperature_unit]}"
+      - pattern: "(?i)^\\s*(temp|temperature)\\s*$"
+        entity_id: "sensor.outdoor_temperature"
+        response: "Temp: {state}°{attributes[unit_of_measurement]}"
+      - pattern: "(?i)^\\s*humidity\\s*$"
+        entity_id: "sensor.outdoor_humidity"
+        response: "Humidity: {state}{attributes[unit_of_measurement]}"

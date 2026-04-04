@@ -24,6 +24,7 @@ def register_plugin(cls: type[BasePlugin]) -> type[BasePlugin]:
 def _discover_builtin_plugins() -> None:
     """Import built-in plugin modules to trigger registration."""
     from meshbridge.plugins import discord as _  # noqa: F401
+    from meshbridge.plugins import homeassistant as _ha  # noqa: F401
     from meshbridge.plugins import ping as _p  # noqa: F401
 
 

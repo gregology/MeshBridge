@@ -1,0 +1,143 @@
+"""Home Assistant plugin for MeshBridge.
+
+Responds to configurable regex-matched mesh messages by querying
+Home Assistant entity states and broadcasting formatted responses.
+"""
+
+from __future__ import annotations
+
+import re
+import string
+from dataclasses import dataclass
+from typing import Any
+
+import aiohttp
+
+from meshbridge.events import EventType, MeshEvent
+from meshbridge.plugin import BasePlugin
+from meshbridge.plugins import register_plugin
+
+
+@dataclass
+class Command:
+    """A compiled regex -> HA entity mapping."""
+
+    pattern: re.Pattern[str]
+    entity_id: str
+    response: str
+
+
+class _AttrDict(dict):
+    """Dict subclass that supports format_map ``{attributes[key]}`` access."""
+
+    def __getitem__(self, key: str) -> Any:
+        value = super().__getitem__(key)
+        if isinstance(value, dict):
+            return _AttrDict(value)
+        return value
+
+
+class _StateFormatter(string.Formatter):
+    """Formatter that gracefully handles missing keys."""
+
+    def get_value(self, key, args, kwargs):
+        if isinstance(key, str):
+            return kwargs.get(key, f"<{key}?>")
+        return super().get_value(key, args, kwargs)
+
+    def get_field(self, field_name, args, kwargs):
+        try:
+            return super().get_field(field_name, args, kwargs)
+        except (KeyError, TypeError, AttributeError):
+            return (f"<{field_name}?>", field_name)
+
+
+_formatter = _StateFormatter()
+
+
+@register_plugin
+class HomeAssistantPlugin(BasePlugin):
+    """Query Home Assistant entities in response to mesh messages.
+
+    Commands are defined in config as regex -> entity_id -> response template
+    mappings.  The response template is formatted with the HA state object
+    fields: ``state``, ``attributes``, ``entity_id``, ``last_changed``, etc.
+    """
+
+    plugin_name = "homeassistant"
+    plugin_version = "0.1.0"
+
+    def __init__(self, app, config: dict) -> None:
+        super().__init__(app, config)
+        self._url: str = config["url"].rstrip("/")
+        self._token: str = config["token"]
+        self._commands: list[Command] = []
+        for cmd in config.get("commands", []):
+            self._commands.append(
+                Command(
+                    pattern=re.compile(cmd["pattern"]),
+                    entity_id=cmd["entity_id"],
+                    response=cmd.get("response", "{state}"),
+                )
+            )
+        self._session: aiohttp.ClientSession | None = None
+
+    async def start(self) -> None:
+        self._session = aiohttp.ClientSession()
+        self._logger.info(
+            "Home Assistant plugin enabled (%d commands, %s)",
+            len(self._commands),
+            self._url,
+        )
+
+    async def stop(self) -> None:
+        if self._session:
+            await self._session.close()
+            self._session = None
+
+    async def on_mesh_event(self, event: MeshEvent) -> None:
+        if event.event_type != EventType.CHANNEL_MESSAGE:
+            return
+        if not event.text:
+            return
+        if event.source_plugin == self.plugin_name:
+            return
+
+        for cmd in self._commands:
+            if cmd.pattern.search(event.text):
+                state = await self._get_state(cmd.entity_id)
+                if state is None:
+                    self._logger.warning(
+                        "Failed to fetch entity %s", cmd.entity_id
+                    )
+                    return
+                reply = self._format_response(cmd.response, state)
+                await self.broadcast(reply, channel=event.channel or 0)
+                return  # first match wins
+
+    async def _get_state(self, entity_id: str) -> dict[str, Any] | None:
+        """Fetch entity state from the Home Assistant REST API."""
+        if not self._session:
+            return None
+        headers = {
+            "Authorization": f"Bearer {self._token}",
+        }
+        try:
+            async with self._session.get(
+                f"{self._url}/api/states/{entity_id}",
+                headers=headers,
+            ) as resp:
+                if resp.status == 200:
+                    return await resp.json()
+                self._logger.warning(
+                    "HA API returned %d for %s", resp.status, entity_id
+                )
+        except aiohttp.ClientError:
+            self._logger.exception("Failed to reach Home Assistant at %s", self._url)
+        return None
+
+    @staticmethod
+    def _format_response(template: str, state: dict[str, Any]) -> str:
+        """Format a response template with HA state data."""
+        context = _AttrDict(state)
+        return _formatter.format(template, **context)
