@@ -182,7 +182,7 @@ class Bridge:
             source = data.get("source_plugin", "unknown")
             logger.info("Outbound ch%d from %s: %s", channel_idx, source, text[:80])
             if self._mc:
-                await self._mc.commands.send_channel_msg(channel_idx, text)
+                await self._mc.commands.send_chan_msg(channel_idx, text)
         except Exception:
             logger.exception("Failed to process outbound channel message")
 

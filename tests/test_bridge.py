@@ -142,7 +142,7 @@ async def test_outbound_channel_msg(bridge):
     payload = json.dumps({"text": "hello mesh", "source_plugin": "discord"}).encode()
     await bridge._on_outbound_channel_msg("meshbridge/outbound/channel/3", payload)
 
-    bridge._mc.commands.send_channel_msg.assert_awaited_once_with(3, "hello mesh")
+    bridge._mc.commands.send_chan_msg.assert_awaited_once_with(3, "hello mesh")
 
 
 @pytest.mark.asyncio
@@ -151,14 +151,14 @@ async def test_outbound_channel_msg_parses_channel_from_topic(bridge):
     payload = json.dumps({"text": "test"}).encode()
     await bridge._on_outbound_channel_msg("meshbridge/outbound/channel/7", payload)
 
-    bridge._mc.commands.send_channel_msg.assert_awaited_once_with(7, "test")
+    bridge._mc.commands.send_chan_msg.assert_awaited_once_with(7, "test")
 
 
 @pytest.mark.asyncio
 async def test_outbound_channel_msg_bad_json(bridge):
     """Malformed JSON doesn't crash the handler."""
     await bridge._on_outbound_channel_msg("meshbridge/outbound/channel/0", b"not json")
-    bridge._mc.commands.send_channel_msg.assert_not_awaited()
+    bridge._mc.commands.send_chan_msg.assert_not_awaited()
 
 
 @pytest.mark.asyncio
