@@ -61,6 +61,64 @@ def test_serialize_includes_source():
     assert result["source"] == "discord"
 
 
+# -- Sender name parsing from channel message text --
+
+
+def _build(bridge, event_type, payload):
+    """Helper to call Bridge._build_mesh_event."""
+    return bridge._build_mesh_event(event_type, payload)
+
+
+def test_channel_msg_extracts_sender_from_text():
+    """MeshCore prepends sender to channel text; bridge should split it."""
+    config = {"device": {"serial_port": "/dev/ttyUSB0"}, "mqtt": {}}
+    b = Bridge(config, AsyncMock())
+    event = _build(b, EventType.CHANNEL_MESSAGE, {
+        "text": "Greg Alt: Ping",
+        "channel_idx": 0,
+        "path_len": 0,
+    })
+    assert event.sender_name == "Greg Alt"
+    assert event.text == "Ping"
+
+
+def test_channel_msg_preserves_explicit_sender_name():
+    """When sender_name is in payload, don't re-parse the text."""
+    config = {"device": {"serial_port": "/dev/ttyUSB0"}, "mqtt": {}}
+    b = Bridge(config, AsyncMock())
+    event = _build(b, EventType.CHANNEL_MESSAGE, {
+        "text": "Hey: what's up?",
+        "channel_idx": 0,
+        "sender_name": "Bob",
+    })
+    assert event.sender_name == "Bob"
+    assert event.text == "Hey: what's up?"
+
+
+def test_channel_msg_no_colon_in_text():
+    """Text without ': ' leaves sender_name as None."""
+    config = {"device": {"serial_port": "/dev/ttyUSB0"}, "mqtt": {}}
+    b = Bridge(config, AsyncMock())
+    event = _build(b, EventType.CHANNEL_MESSAGE, {
+        "text": "hello",
+        "channel_idx": 0,
+    })
+    assert event.sender_name is None
+    assert event.text == "hello"
+
+
+def test_contact_msg_does_not_split_text():
+    """Contact messages should NOT strip sender from text."""
+    config = {"device": {"serial_port": "/dev/ttyUSB0"}, "mqtt": {}}
+    b = Bridge(config, AsyncMock())
+    event = _build(b, EventType.CONTACT_MESSAGE, {
+        "text": "Greg Alt: Ping",
+        "channel_idx": 0,
+    })
+    assert event.sender_name is None
+    assert event.text == "Greg Alt: Ping"
+
+
 # -- Bridge outbound handler tests --
 
 

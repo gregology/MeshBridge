@@ -114,11 +114,26 @@ class Bridge:
     def _build_mesh_event(self, event_type: EventType, payload: dict) -> MeshEvent:
         """Convert a meshcore payload into a MeshEvent."""
         if event_type in (EventType.CHANNEL_MESSAGE, EventType.CONTACT_MESSAGE):
+            text = payload.get("text")
+            sender_name = payload.get("sender_name", payload.get("adv_name"))
+
+            # MeshCore radio firmware prepends the sender name to channel
+            # message text as "SenderName: message".  When the payload has no
+            # explicit sender_name field (typical for CHANNEL_MSG_RECV), split
+            # it out so downstream plugins see clean text.
+            if (
+                event_type == EventType.CHANNEL_MESSAGE
+                and not sender_name
+                and text
+                and ": " in text
+            ):
+                sender_name, text = text.split(": ", 1)
+
             return MeshEvent(
                 event_type=event_type,
-                text=payload.get("text"),
+                text=text,
                 channel=payload.get("channel_idx"),
-                sender_name=payload.get("sender_name", payload.get("adv_name")),
+                sender_name=sender_name,
                 sender_key_prefix=payload.get("pubkey_prefix"),
                 sender_timestamp=payload.get("sender_timestamp"),
                 path_len=payload.get("path_len"),
