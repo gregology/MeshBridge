@@ -151,7 +151,13 @@ async def test_ignores_non_matching_messages(ha_plugin, text):
 
 
 @pytest.mark.asyncio
-async def test_ignores_non_channel_messages(ha_plugin):
+async def test_responds_to_dm_with_direct_reply(ha_plugin):
+    """DM with a matching command gets a direct reply, not a broadcast."""
+    ha_plugin._session = _mock_session({
+        "state": "sunny",
+        "attributes": {"temperature": 72, "temperature_unit": "F"},
+        "entity_id": "weather.home",
+    })
     event = MeshEvent(
         event_type=EventType.CONTACT_MESSAGE,
         text="weather",
@@ -159,6 +165,9 @@ async def test_ignores_non_channel_messages(ha_plugin):
     )
     await ha_plugin.on_mesh_event(event)
     ha_plugin._app.broadcast.assert_not_awaited()
+    ha_plugin._app.send_direct_to_mesh.assert_awaited_once_with(
+        text="sunny — 72°F", contact_name="TestNode", source_plugin="homeassistant"
+    )
 
 
 @pytest.mark.asyncio

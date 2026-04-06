@@ -77,8 +77,8 @@ async def test_ignores_non_ping_messages(ping_plugin, text):
 
 
 @pytest.mark.asyncio
-async def test_ignores_non_channel_messages(ping_plugin):
-    """Direct messages with 'ping' are ignored."""
+async def test_responds_to_dm_ping(ping_plugin):
+    """Direct messages with 'ping' get a direct pong reply."""
     event = MeshEvent(
         event_type=EventType.CONTACT_MESSAGE,
         text="ping",
@@ -86,6 +86,9 @@ async def test_ignores_non_channel_messages(ping_plugin):
     )
     await ping_plugin.on_mesh_event(event)
     ping_plugin._app.broadcast.assert_not_awaited()
+    ping_plugin._app.send_direct_to_mesh.assert_awaited_once_with(
+        text="pong", contact_name="TestNode", source_plugin="ping"
+    )
 
 
 @pytest.mark.asyncio

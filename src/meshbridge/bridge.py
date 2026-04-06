@@ -58,6 +58,11 @@ class Bridge:
 
         logger.info("Connecting to MeshCore device on %s", serial_port)
         self._mc = await MeshCore.create_serial(serial_port, baudrate=baudrate)
+        if self._mc is None:
+            raise ConnectionError(
+                f"Failed to connect to MeshCore device on {serial_port}. "
+                "Check that the device is plugged in and is a serial companion."
+            )
         logger.info("Connected: device=%s", self._mc.self_info.get("name", "unknown"))
 
         # Optionally set the radio device name from config and advertise

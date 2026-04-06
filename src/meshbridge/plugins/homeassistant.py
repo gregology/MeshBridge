@@ -104,7 +104,7 @@ class HomeAssistantPlugin(BasePlugin):
             self._session = None
 
     async def on_mesh_event(self, event: MeshEvent) -> None:
-        if event.event_type != EventType.CHANNEL_MESSAGE:
+        if event.event_type not in (EventType.CHANNEL_MESSAGE, EventType.CONTACT_MESSAGE):
             return
         if not event.text:
             return
@@ -117,7 +117,10 @@ class HomeAssistantPlugin(BasePlugin):
                 if context is None:
                     return
                 reply = self._format_response(cmd.response, context)
-                await self.broadcast(reply, channel=event.channel or 0)
+                if event.event_type == EventType.CONTACT_MESSAGE and event.sender_name:
+                    await self.send_direct_to_mesh(reply, contact_name=event.sender_name)
+                else:
+                    await self.broadcast(reply, channel=event.channel or 0)
                 return  # first match wins
 
     async def _fetch_entities(self, entities: dict[str, str]) -> dict[str, Any] | None:

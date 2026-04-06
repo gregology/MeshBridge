@@ -29,13 +29,17 @@ class PingPlugin(BasePlugin):
         pass
 
     async def on_mesh_event(self, event: MeshEvent) -> None:
-        if event.event_type != EventType.CHANNEL_MESSAGE:
+        if event.event_type not in (EventType.CHANNEL_MESSAGE, EventType.CONTACT_MESSAGE):
             return
         if not event.text or not _PING_PATTERN.match(event.text):
             return
         if event.source_plugin == self.plugin_name:
             return
 
-        channel = event.channel or 0
-        self._logger.info("Ping from %s on ch%d, sending pong", event.sender_name, channel)
-        await self.broadcast("pong", channel=channel)
+        if event.event_type == EventType.CONTACT_MESSAGE and event.sender_name:
+            self._logger.info("Ping DM from %s, sending pong", event.sender_name)
+            await self.send_direct_to_mesh("pong", contact_name=event.sender_name)
+        else:
+            channel = event.channel or 0
+            self._logger.info("Ping from %s on ch%d, sending pong", event.sender_name, channel)
+            await self.broadcast("pong", channel=channel)
