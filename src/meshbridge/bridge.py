@@ -133,6 +133,14 @@ class Bridge:
             text = payload.get("text")
             sender_name = payload.get("sender_name", payload.get("adv_name"))
 
+            # DM payloads don't include sender_name — resolve from contacts list
+            if not sender_name and self._mc:
+                pubkey = payload.get("pubkey_prefix")
+                if pubkey:
+                    contact = self._mc.get_contact_by_key_prefix(pubkey)
+                    if contact:
+                        sender_name = contact.get("adv_name")
+
             # MeshCore radio firmware prepends the sender name to channel
             # message text as "SenderName: message".  When the payload has no
             # explicit sender_name field (typical for CHANNEL_MSG_RECV), split
@@ -208,14 +216,20 @@ class Bridge:
             data = json.loads(payload)
             text = data["text"]
             contact_name = data.get("contact_name")
+            contact_key = data.get("contact_key")
             source = data.get("source_plugin", "unknown")
-            logger.info("Outbound DM to %s from %s: %s", contact_name, source, text[:80])
-            if self._mc and contact_name:
+            logger.info("Outbound DM to %s from %s: %s", contact_name or contact_key, source, text[:80])
+            if not self._mc:
+                return
+            contact = None
+            if contact_name:
                 contact = self._mc.get_contact_by_name(contact_name)
-                if contact:
-                    await self._mc.commands.send_msg(contact, text)
-                else:
-                    logger.warning("Contact not found: %s", contact_name)
+            if not contact and contact_key:
+                contact = self._mc.get_contact_by_key_prefix(contact_key)
+            if contact:
+                await self._mc.commands.send_msg(contact, text)
+            else:
+                logger.warning("Contact not found: name=%s key=%s", contact_name, contact_key)
         except Exception:
             logger.exception("Failed to process outbound direct message")
 

@@ -63,12 +63,15 @@ class BasePlugin(ABC):
             source_plugin=self.plugin_name,
         )
 
-    async def send_direct_to_mesh(self, text: str, contact_name: str) -> None:
+    async def send_direct_to_mesh(
+        self, text: str, contact_name: str = "", contact_key: str = ""
+    ) -> None:
         """Send a direct message to a specific mesh contact."""
         await self._app.send_direct_to_mesh(
             text=text,
             contact_name=contact_name,
             source_plugin=self.plugin_name,
+            contact_key=contact_key,
         )
 
     @property

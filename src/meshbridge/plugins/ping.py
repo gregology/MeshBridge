@@ -36,9 +36,14 @@ class PingPlugin(BasePlugin):
         if event.source_plugin == self.plugin_name:
             return
 
-        if event.event_type == EventType.CONTACT_MESSAGE and event.sender_name:
-            self._logger.info("Ping DM from %s, sending pong", event.sender_name)
-            await self.send_direct_to_mesh("pong", contact_name=event.sender_name)
+        if event.event_type == EventType.CONTACT_MESSAGE:
+            sender = event.sender_name or event.sender_key_prefix
+            self._logger.info("Ping DM from %s, sending pong", sender)
+            await self.send_direct_to_mesh(
+                "pong",
+                contact_name=event.sender_name or "",
+                contact_key=event.sender_key_prefix or "",
+            )
         else:
             channel = event.channel or 0
             self._logger.info("Ping from %s on ch%d, sending pong", event.sender_name, channel)

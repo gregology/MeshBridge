@@ -162,17 +162,25 @@ class App:
         )
 
     async def send_direct_to_mesh(
-        self, text: str, contact_name: str, source_plugin: str = ""
+        self,
+        text: str,
+        contact_name: str = "",
+        source_plugin: str = "",
+        contact_key: str = "",
     ) -> None:
         """Publish a direct message to MQTT outbound (called by plugins)."""
         if not self._mqtt:
             return
         prefix = self._config["mqtt"].get("topic_prefix", "meshbridge")
+        identifier = contact_name or contact_key or "unknown"
+        payload: dict[str, str] = {"text": text, "source_plugin": source_plugin}
+        if contact_name:
+            payload["contact_name"] = contact_name
+        if contact_key:
+            payload["contact_key"] = contact_key
         await self._mqtt.publish(
-            f"{prefix}/outbound/direct/{contact_name}",
-            json.dumps(
-                {"text": text, "contact_name": contact_name, "source_plugin": source_plugin}
-            ),
+            f"{prefix}/outbound/direct/{identifier}",
+            json.dumps(payload),
         )
 
     def _setup_logging(self) -> None:

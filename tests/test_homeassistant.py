@@ -162,11 +162,13 @@ async def test_responds_to_dm_with_direct_reply(ha_plugin):
         event_type=EventType.CONTACT_MESSAGE,
         text="weather",
         sender_name="TestNode",
+        sender_key_prefix="abc123",
     )
     await ha_plugin.on_mesh_event(event)
     ha_plugin._app.broadcast.assert_not_awaited()
     ha_plugin._app.send_direct_to_mesh.assert_awaited_once_with(
-        text="sunny — 72°F", contact_name="TestNode", source_plugin="homeassistant"
+        text="sunny — 72°F", contact_name="TestNode", source_plugin="homeassistant",
+        contact_key="abc123",
     )
 
 

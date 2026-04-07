@@ -83,11 +83,27 @@ async def test_responds_to_dm_ping(ping_plugin):
         event_type=EventType.CONTACT_MESSAGE,
         text="ping",
         sender_name="TestNode",
+        sender_key_prefix="abc123",
     )
     await ping_plugin.on_mesh_event(event)
     ping_plugin._app.broadcast.assert_not_awaited()
     ping_plugin._app.send_direct_to_mesh.assert_awaited_once_with(
-        text="pong", contact_name="TestNode", source_plugin="ping"
+        text="pong", contact_name="TestNode", source_plugin="ping", contact_key="abc123"
+    )
+
+
+@pytest.mark.asyncio
+async def test_responds_to_dm_ping_without_sender_name(ping_plugin):
+    """DM ping with only key prefix still gets a direct reply."""
+    event = MeshEvent(
+        event_type=EventType.CONTACT_MESSAGE,
+        text="ping",
+        sender_key_prefix="def456",
+    )
+    await ping_plugin.on_mesh_event(event)
+    ping_plugin._app.broadcast.assert_not_awaited()
+    ping_plugin._app.send_direct_to_mesh.assert_awaited_once_with(
+        text="pong", contact_name="", source_plugin="ping", contact_key="def456"
     )
 
 

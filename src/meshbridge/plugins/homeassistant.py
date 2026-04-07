@@ -117,8 +117,12 @@ class HomeAssistantPlugin(BasePlugin):
                 if context is None:
                     return
                 reply = self._format_response(cmd.response, context)
-                if event.event_type == EventType.CONTACT_MESSAGE and event.sender_name:
-                    await self.send_direct_to_mesh(reply, contact_name=event.sender_name)
+                if event.event_type == EventType.CONTACT_MESSAGE:
+                    await self.send_direct_to_mesh(
+                        reply,
+                        contact_name=event.sender_name or "",
+                        contact_key=event.sender_key_prefix or "",
+                    )
                 else:
                     await self.broadcast(reply, channel=event.channel or 0)
                 return  # first match wins
