@@ -221,15 +221,19 @@ class Bridge:
             logger.info("Outbound DM to %s from %s: %s", contact_name or contact_key, source, text[:80])
             if not self._mc:
                 return
-            contact = None
+            # Resolve destination: try contact name, then key prefix lookup,
+            # then send directly to the raw key prefix (meshcore accepts hex strings).
+            dest = None
             if contact_name:
-                contact = self._mc.get_contact_by_name(contact_name)
-            if not contact and contact_key:
-                contact = self._mc.get_contact_by_key_prefix(contact_key)
-            if contact:
-                await self._mc.commands.send_msg(contact, text)
+                dest = self._mc.get_contact_by_name(contact_name)
+            if not dest and contact_key:
+                dest = self._mc.get_contact_by_key_prefix(contact_key)
+            if not dest and contact_key:
+                dest = contact_key
+            if dest:
+                await self._mc.commands.send_msg(dest, text)
             else:
-                logger.warning("Contact not found: name=%s key=%s", contact_name, contact_key)
+                logger.warning("No destination for DM: name=%s key=%s", contact_name, contact_key)
         except Exception:
             logger.exception("Failed to process outbound direct message")
 

@@ -268,19 +268,19 @@ async def test_outbound_direct_msg_name_fallback_to_key(bridge):
 
 
 @pytest.mark.asyncio
-async def test_outbound_direct_msg_contact_not_found(bridge):
-    """Unknown contact name and key logs warning, doesn't crash."""
+async def test_outbound_direct_msg_falls_back_to_raw_key(bridge):
+    """When contact lookups fail, sends directly using the raw key prefix."""
     bridge._mc.get_contact_by_name.return_value = None
     bridge._mc.get_contact_by_key_prefix.return_value = None
     payload = json.dumps({
         "text": "hi",
         "contact_name": "Unknown",
-        "contact_key": "bad_key",
+        "contact_key": "abc123def456",
     }).encode()
 
     await bridge._on_outbound_direct_msg("meshbridge/outbound/direct/Unknown", payload)
 
-    bridge._mc.commands.send_msg.assert_not_awaited()
+    bridge._mc.commands.send_msg.assert_awaited_once_with("abc123def456", "hi")
 
 
 @pytest.mark.asyncio

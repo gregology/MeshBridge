@@ -109,7 +109,7 @@ def _setup_discord() -> dict:
         "bot_username": bot_username,
         "include_metadata": True,
         "channels": [0],
-        "event_types": ["CHANNEL_MESSAGE", "CONTACT_MESSAGE"],
+        "event_types": ["CHANNEL_MESSAGE"],
     }
 
 
