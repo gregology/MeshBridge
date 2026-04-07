@@ -32,7 +32,7 @@ class DiscordPlugin(BasePlugin):
         self._include_metadata: bool = config.get("include_metadata", True)
         self._channels: list[int] = config.get("channels", [])
         self._event_types: list[str] = config.get(
-            "event_types", ["CHANNEL_MESSAGE", "CONTACT_MESSAGE"]
+            "event_types", ["CHANNEL_MESSAGE"]
         )
         self._session: aiohttp.ClientSession | None = None
 
