@@ -71,8 +71,8 @@ fi
 info "Setting up Python virtual environment..."
 python3 -m venv "$VENV_DIR"
 "$VENV_DIR/bin/pip" install --quiet --upgrade pip
-"$VENV_DIR/bin/pip" install --quiet --force-reinstall --no-deps --no-cache-dir "$INSTALL_DIR"
-"$VENV_DIR/bin/pip" install --quiet --upgrade "$INSTALL_DIR"
+"$VENV_DIR/bin/pip" install --quiet --force-reinstall --no-deps "$INSTALL_DIR"
+"$VENV_DIR/bin/pip" install --quiet "$INSTALL_DIR"
 info "MeshBridge installed: $("$VENV_DIR/bin/meshbridge" --help | head -1)"
 
 # -- 6. Create directories --
