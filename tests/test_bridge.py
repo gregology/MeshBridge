@@ -290,3 +290,54 @@ async def test_outbound_direct_msg_no_contact_name(bridge):
     await bridge._on_outbound_direct_msg("meshbridge/outbound/direct/someone", payload)
 
     bridge._mc.commands.send_msg.assert_not_awaited()
+
+
+# -- Path extraction tests --
+
+
+def test_path_extracted_from_payload():
+    """Path list is extracted from payload and present on MeshEvent."""
+    config = {"device": {"serial_port": "/dev/ttyUSB0"}, "mqtt": {}}
+    b = Bridge(config, AsyncMock())
+    event = _build(b, EventType.CHANNEL_MESSAGE, {
+        "text": "Node1: hello",
+        "channel_idx": 0,
+        "path": ["abc123", "def456"],
+        "path_len": 2,
+    })
+    assert event.path == ["abc123", "def456"]
+
+
+def test_path_falls_back_to_out_path():
+    """When 'path' key is absent, falls back to 'out_path'."""
+    config = {"device": {"serial_port": "/dev/ttyUSB0"}, "mqtt": {}}
+    b = Bridge(config, AsyncMock())
+    event = _build(b, EventType.CHANNEL_MESSAGE, {
+        "text": "Node1: hello",
+        "channel_idx": 0,
+        "out_path": ["aaa111", "bbb222", "ccc333"],
+        "path_len": 3,
+    })
+    assert event.path == ["aaa111", "bbb222", "ccc333"]
+
+
+def test_path_serialized_to_json():
+    """Path field is included in serialized JSON when non-None."""
+    event = MeshEvent(
+        event_type=EventType.CHANNEL_MESSAGE,
+        text="hi",
+        path=["abc123", "def456"],
+    )
+    result = json.loads(_serialize_event(event))
+    assert result["path"] == ["abc123", "def456"]
+
+
+def test_path_none_omitted_from_serialization():
+    """Path field is omitted from serialized JSON when None."""
+    event = MeshEvent(
+        event_type=EventType.CHANNEL_MESSAGE,
+        text="hi",
+        path=None,
+    )
+    result = json.loads(_serialize_event(event))
+    assert "path" not in result
