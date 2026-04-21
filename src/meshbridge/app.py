@@ -139,6 +139,7 @@ class App:
                 sender_key_prefix=data.get("sender_key_prefix"),
                 sender_timestamp=data.get("sender_timestamp"),
                 path_len=data.get("path_len"),
+                path=data.get("path"),
                 telemetry=data.get("telemetry"),
                 node_name=data.get("node_name"),
                 source_plugin=data.get("source_plugin"),
