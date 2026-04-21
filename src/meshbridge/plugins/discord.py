@@ -31,9 +31,7 @@ class DiscordPlugin(BasePlugin):
         self._avatar_url: str = config.get("avatar_url", "")
         self._include_metadata: bool = config.get("include_metadata", True)
         self._channels: list[int] = config.get("channels", [])
-        self._event_types: list[str] = config.get(
-            "event_types", ["CHANNEL_MESSAGE"]
-        )
+        self._event_types: list[str] = config.get("event_types", ["CHANNEL_MESSAGE"])
         self._session: aiohttp.ClientSession | None = None
 
         # Bot mode
@@ -154,13 +152,9 @@ class DiscordPlugin(BasePlugin):
             if event.channel is not None:
                 fields.append({"name": "Channel", "value": str(event.channel), "inline": True})
             if event.sender_key_prefix:
-                fields.append(
-                    {"name": "Key", "value": event.sender_key_prefix, "inline": True}
-                )
+                fields.append({"name": "Key", "value": event.sender_key_prefix, "inline": True})
             if event.path:
-                fields.append(
-                    {"name": "Path", "value": " > ".join(event.path), "inline": False}
-                )
+                fields.append({"name": "Path", "value": " > ".join(event.path), "inline": False})
             if fields:
                 webhook_data["embeds"] = [{"fields": fields, "color": 0x00B0F0}]
 
@@ -171,9 +165,7 @@ class DiscordPlugin(BasePlugin):
                 elif resp.status == 429:
                     body = await resp.json()
                     retry_after = body.get("retry_after", 1)
-                    self._logger.warning(
-                        "Discord rate limited, retry after %ss", retry_after
-                    )
+                    self._logger.warning("Discord rate limited, retry after %ss", retry_after)
                 else:
                     self._logger.warning("Discord webhook error: %d", resp.status)
         except aiohttp.ClientError:

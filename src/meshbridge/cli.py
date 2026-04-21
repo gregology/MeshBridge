@@ -20,7 +20,9 @@ def main() -> None:
     config_arg.add_argument("-c", "--config", default=None, help="Path to config.yaml")
 
     # meshbridge run
-    run_parser = subparsers.add_parser("run", parents=[config_arg], help="Start the MeshBridge service")
+    run_parser = subparsers.add_parser(
+        "run", parents=[config_arg], help="Start the MeshBridge service"
+    )
     run_parser.add_argument("--debug", action="store_true", help="Enable debug logging")
 
     # meshbridge setup

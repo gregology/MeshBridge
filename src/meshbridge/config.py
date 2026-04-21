@@ -46,8 +46,7 @@ def _resolve_path(path: str | None) -> Path:
             return candidate
     searched = [str(p) for p in DEFAULT_CONFIG_PATHS]
     raise FileNotFoundError(
-        f"No config file found. Searched: {searched}. "
-        "Run 'meshbridge setup' to create one."
+        f"No config file found. Searched: {searched}. Run 'meshbridge setup' to create one."
     )
 
 

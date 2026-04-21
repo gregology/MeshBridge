@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Awaitable, Callable
+from collections.abc import Awaitable, Callable
 
 import paho.mqtt.client as mqtt
 
@@ -80,7 +80,10 @@ class MQTTClient:
 
     def _on_disconnect(self, client, userdata, flags, reason_code, properties) -> None:
         if reason_code != 0:
-            logger.warning("MQTT disconnected unexpectedly (rc=%s), will auto-reconnect", reason_code)
+            logger.warning(
+                "MQTT disconnected unexpectedly (rc=%s), will auto-reconnect",
+                reason_code,
+            )
 
 
 def _topic_matches(pattern: str, topic: str) -> bool:

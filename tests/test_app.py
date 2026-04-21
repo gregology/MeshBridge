@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
-from meshbridge.events import EventType, MeshEvent
 from meshbridge.app import App
+from meshbridge.events import EventType, MeshEvent
 
 
 @pytest.fixture
@@ -159,13 +159,15 @@ async def test_dispatch_parses_mqtt_payload(app):
     plugin.plugin_name = "test"
     app._plugins = [plugin]
 
-    payload = json.dumps({
-        "event_type": "CHANNEL_MESSAGE",
-        "text": "hello",
-        "channel": 0,
-        "source": "mesh",
-        "sender_name": "Node1",
-    }).encode()
+    payload = json.dumps(
+        {
+            "event_type": "CHANNEL_MESSAGE",
+            "text": "hello",
+            "channel": 0,
+            "source": "mesh",
+            "sender_name": "Node1",
+        }
+    ).encode()
 
     await app._dispatch_to_plugins("meshbridge/inbound/channel/0", payload)
 
@@ -208,10 +210,12 @@ async def test_dispatch_defaults_source_to_mesh(app):
     plugin.plugin_name = "test"
     app._plugins = [plugin]
 
-    payload = json.dumps({
-        "event_type": "CHANNEL_MESSAGE",
-        "text": "hello",
-    }).encode()
+    payload = json.dumps(
+        {
+            "event_type": "CHANNEL_MESSAGE",
+            "text": "hello",
+        }
+    ).encode()
 
     await app._dispatch_to_plugins("meshbridge/inbound/channel/0", payload)
 

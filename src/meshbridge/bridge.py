@@ -222,7 +222,12 @@ class Bridge:
             contact_name = data.get("contact_name")
             contact_key = data.get("contact_key")
             source = data.get("source_plugin", "unknown")
-            logger.info("Outbound DM to %s from %s: %s", contact_name or contact_key, source, text[:80])
+            logger.info(
+                "Outbound DM to %s from %s: %s",
+                contact_name or contact_key,
+                source,
+                text[:80],
+            )
             if not self._mc:
                 return
             # Resolve destination: try contact name, then key prefix lookup,
