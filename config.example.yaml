@@ -63,8 +63,12 @@ plugins:
     enabled: true
 
   route:
-    # Responds with the message path when someone sends "route", "path", or "traceroute".
+    # When someone sends "route", "path", or "traceroute", issues a live
+    # path discovery against that sender and replies with the discovered
+    # hop hashes. Requires the sender to be a known contact on the device.
     enabled: true
+    # How long (seconds) to wait for the path-discovery response.
+    timeout: 30
 
   homeassistant:
     enabled: false

@@ -30,7 +30,6 @@ _SERIALIZE_FIELDS = (
     "sender_key_prefix",
     "sender_timestamp",
     "path_len",
-    "path",
     "telemetry",
     "node_name",
     "source_plugin",
@@ -89,6 +88,10 @@ class Bridge:
         await self._mqtt.subscribe(
             f"{self._topic_prefix}/outbound/direct/+",
             self._on_outbound_direct_msg,
+        )
+        await self._mqtt.subscribe(
+            f"{self._topic_prefix}/outbound/trace_request",
+            self._on_trace_request,
         )
 
         # Start auto-fetching messages from the device
@@ -154,8 +157,6 @@ class Bridge:
             ):
                 sender_name, text = text.split(": ", 1)
 
-            path = payload.get("path") or payload.get("out_path")
-
             return MeshEvent(
                 event_type=event_type,
                 text=text,
@@ -164,7 +165,6 @@ class Bridge:
                 sender_key_prefix=payload.get("pubkey_prefix"),
                 sender_timestamp=payload.get("sender_timestamp"),
                 path_len=payload.get("path_len"),
-                path=path if isinstance(path, list) else None,
                 raw=payload,
             )
         elif event_type == EventType.TELEMETRY:
@@ -245,6 +245,85 @@ class Bridge:
                 logger.warning("No destination for DM: name=%s key=%s", contact_name, contact_key)
         except Exception:
             logger.exception("Failed to process outbound direct message")
+
+    # -- Trace (path discovery) --
+
+    async def _on_trace_request(self, topic: str, payload: bytes) -> None:
+        """Handle a trace request from a plugin.
+
+        Issues a path discovery to the target contact, awaits the meshcore
+        PATH_RESPONSE, and publishes the formatted path back on
+        ``inbound/trace_result/{corr_id}``.
+        """
+        corr_id = ""
+        try:
+            data = json.loads(payload)
+            corr_id = data["corr_id"]
+            key_or_name = data.get("key_or_name") or ""
+            timeout = float(data.get("timeout", 30.0))
+        except (json.JSONDecodeError, KeyError, ValueError):
+            logger.exception("Malformed trace_request payload")
+            return
+
+        result = await self._run_trace(key_or_name, timeout)
+        result["corr_id"] = corr_id
+        await self._mqtt.publish(
+            f"{self._topic_prefix}/inbound/trace_result/{corr_id}",
+            json.dumps(result),
+        )
+
+    async def _run_trace(self, key_or_name: str, timeout: float) -> dict[str, Any]:
+        """Resolve a contact and return a formatted trace result dict."""
+        if not self._mc:
+            return {"error": "bridge not connected"}
+
+        contact = self._mc.get_contact_by_key_prefix(
+            key_or_name
+        ) or self._mc.get_contact_by_name(key_or_name)
+        if not contact:
+            return {"error": f"unknown contact '{key_or_name}'"}
+
+        public_key = contact.get("public_key", "")
+        if len(public_key) < 12:
+            return {"error": "contact missing public key"}
+        pubkey_pre = public_key[:12]
+
+        try:
+            await self._mc.commands.send_path_discovery(contact)
+        except Exception as exc:
+            logger.exception("send_path_discovery failed")
+            return {"error": f"path discovery failed: {exc}"}
+
+        event = await self._mc.wait_for_event(
+            MCEventType.PATH_RESPONSE,
+            attribute_filters={"pubkey_pre": pubkey_pre},
+            timeout=timeout,
+        )
+        if event is None:
+            return {"error": "trace timed out"}
+
+        return _format_trace_event(event.payload, contact)
+
+
+def _format_trace_event(payload: dict, contact: dict) -> dict[str, Any]:
+    """Format a meshcore PATH_RESPONSE payload into a trace result dict."""
+    out_path_len = int(payload.get("out_path_len") or 0)
+    out_path_hex = str(payload.get("out_path") or "")
+    contact_name = contact.get("adv_name")
+
+    if out_path_len == 0:
+        return {
+            "path_text": "direct (0 hops)",
+            "hops": 0,
+            "contact_name": contact_name,
+        }
+
+    nodes = [out_path_hex[i : i + 2] for i in range(0, out_path_len * 2, 2)]
+    return {
+        "path_text": " > ".join(nodes),
+        "hops": out_path_len,
+        "contact_name": contact_name,
+    }
 
 
 def _serialize_event(event: MeshEvent) -> str:

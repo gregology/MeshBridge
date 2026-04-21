@@ -316,60 +316,105 @@ async def test_outbound_direct_msg_no_contact_name(bridge):
     bridge._mc.commands.send_msg.assert_not_awaited()
 
 
-# -- Path extraction tests --
+# -- Trace request handler tests --
 
 
-def test_path_extracted_from_payload():
-    """Path list is extracted from payload and present on MeshEvent."""
-    config = {"device": {"serial_port": "/dev/ttyUSB0"}, "mqtt": {}}
-    b = Bridge(config, AsyncMock())
-    event = _build(
-        b,
-        EventType.CHANNEL_MESSAGE,
-        {
-            "text": "Node1: hello",
-            "channel_idx": 0,
-            "path": ["abc123", "def456"],
-            "path_len": 2,
-        },
+def _make_path_response_event(payload: dict):
+    ev = MagicMock()
+    ev.payload = payload
+    return ev
+
+
+@pytest.mark.asyncio
+async def test_trace_request_unknown_contact(bridge):
+    """Unknown contact returns an error trace_result."""
+    bridge._mc.get_contact_by_key_prefix.return_value = None
+    bridge._mc.get_contact_by_name.return_value = None
+
+    payload = json.dumps({"corr_id": "abc", "key_or_name": "ghost"}).encode()
+    await bridge._on_trace_request("meshbridge/outbound/trace_request", payload)
+
+    bridge._mqtt.publish.assert_awaited_once()
+    topic, body = bridge._mqtt.publish.await_args.args
+    assert topic == "meshbridge/inbound/trace_result/abc"
+    data = json.loads(body)
+    assert data["corr_id"] == "abc"
+    assert "unknown contact" in data["error"]
+
+
+@pytest.mark.asyncio
+async def test_trace_request_success(bridge):
+    """A successful trace publishes formatted path hops."""
+    contact = {"public_key": "a" * 64, "adv_name": "TestNode"}
+    bridge._mc.get_contact_by_key_prefix.return_value = contact
+    bridge._mc.wait_for_event = AsyncMock(
+        return_value=_make_path_response_event(
+            {"out_path_len": 3, "out_path": "23ab5f"}
+        )
     )
-    assert event.path == ["abc123", "def456"]
+
+    payload = json.dumps({"corr_id": "c1", "key_or_name": "a" * 12}).encode()
+    await bridge._on_trace_request("meshbridge/outbound/trace_request", payload)
+
+    bridge._mc.commands.send_path_discovery.assert_awaited_once_with(contact)
+    topic, body = bridge._mqtt.publish.await_args.args
+    assert topic == "meshbridge/inbound/trace_result/c1"
+    data = json.loads(body)
+    assert data["corr_id"] == "c1"
+    assert data["path_text"] == "23 > ab > 5f"
+    assert data["hops"] == 3
+    assert data["contact_name"] == "TestNode"
 
 
-def test_path_falls_back_to_out_path():
-    """When 'path' key is absent, falls back to 'out_path'."""
-    config = {"device": {"serial_port": "/dev/ttyUSB0"}, "mqtt": {}}
-    b = Bridge(config, AsyncMock())
-    event = _build(
-        b,
-        EventType.CHANNEL_MESSAGE,
-        {
-            "text": "Node1: hello",
-            "channel_idx": 0,
-            "out_path": ["aaa111", "bbb222", "ccc333"],
-            "path_len": 3,
-        },
+@pytest.mark.asyncio
+async def test_trace_request_zero_hops(bridge):
+    """out_path_len of zero is reported as 'direct (0 hops)'."""
+    contact = {"public_key": "b" * 64, "adv_name": "Neighbor"}
+    bridge._mc.get_contact_by_key_prefix.return_value = contact
+    bridge._mc.wait_for_event = AsyncMock(
+        return_value=_make_path_response_event({"out_path_len": 0, "out_path": ""})
     )
-    assert event.path == ["aaa111", "bbb222", "ccc333"]
+
+    payload = json.dumps({"corr_id": "c2", "key_or_name": "b" * 12}).encode()
+    await bridge._on_trace_request("meshbridge/outbound/trace_request", payload)
+
+    body = bridge._mqtt.publish.await_args.args[1]
+    data = json.loads(body)
+    assert data["path_text"] == "direct (0 hops)"
+    assert data["hops"] == 0
 
 
-def test_path_serialized_to_json():
-    """Path field is included in serialized JSON when non-None."""
-    event = MeshEvent(
-        event_type=EventType.CHANNEL_MESSAGE,
-        text="hi",
-        path=["abc123", "def456"],
+@pytest.mark.asyncio
+async def test_trace_request_timeout(bridge):
+    """wait_for_event returning None surfaces a 'trace timed out' error."""
+    contact = {"public_key": "c" * 64, "adv_name": "Silent"}
+    bridge._mc.get_contact_by_key_prefix.return_value = contact
+    bridge._mc.wait_for_event = AsyncMock(return_value=None)
+
+    payload = json.dumps({"corr_id": "c3", "key_or_name": "c" * 12}).encode()
+    await bridge._on_trace_request("meshbridge/outbound/trace_request", payload)
+
+    body = bridge._mqtt.publish.await_args.args[1]
+    data = json.loads(body)
+    assert data["error"] == "trace timed out"
+
+
+@pytest.mark.asyncio
+async def test_trace_request_falls_back_to_name_lookup(bridge):
+    """When key_prefix lookup misses, falls back to name lookup."""
+    contact = {"public_key": "d" * 64, "adv_name": "ByName"}
+    bridge._mc.get_contact_by_key_prefix.return_value = None
+    bridge._mc.get_contact_by_name.return_value = contact
+    bridge._mc.wait_for_event = AsyncMock(
+        return_value=_make_path_response_event(
+            {"out_path_len": 1, "out_path": "ff"}
+        )
     )
-    result = json.loads(_serialize_event(event))
-    assert result["path"] == ["abc123", "def456"]
 
+    payload = json.dumps({"corr_id": "c4", "key_or_name": "ByName"}).encode()
+    await bridge._on_trace_request("meshbridge/outbound/trace_request", payload)
 
-def test_path_none_omitted_from_serialization():
-    """Path field is omitted from serialized JSON when None."""
-    event = MeshEvent(
-        event_type=EventType.CHANNEL_MESSAGE,
-        text="hi",
-        path=None,
-    )
-    result = json.loads(_serialize_event(event))
-    assert "path" not in result
+    bridge._mc.get_contact_by_name.assert_called_with("ByName")
+    body = bridge._mqtt.publish.await_args.args[1]
+    data = json.loads(body)
+    assert data["path_text"] == "ff"

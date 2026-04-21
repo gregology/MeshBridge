@@ -61,7 +61,6 @@ class MeshEvent:
     sender_key_prefix: str | None = None
     sender_timestamp: int | None = None
     path_len: int | None = None
-    path: list[str] | None = None
 
     # Telemetry fields (TELEMETRY, SENSOR_DATA)
     telemetry: dict[str, Any] | None = None

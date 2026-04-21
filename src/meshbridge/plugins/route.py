@@ -1,4 +1,8 @@
-"""Route/path/traceroute responder plugin for MeshBridge."""
+"""Route/path/traceroute responder plugin for MeshBridge.
+
+On receiving ``route``/``path``/``traceroute`` from a sender, issues a live
+path discovery against that sender and replies with the discovered hops.
+"""
 
 from __future__ import annotations
 
@@ -16,13 +20,17 @@ _ROUTE_PATTERN = re.compile(
 
 @register_plugin
 class RoutePlugin(BasePlugin):
-    """Respond to route/path/traceroute messages with the message path."""
+    """Respond to route/path/traceroute messages with a live trace to the sender."""
 
     plugin_name = "route"
-    plugin_version = "0.1.0"
+    plugin_version = "0.2.0"
+
+    def __init__(self, app, config: dict) -> None:
+        super().__init__(app, config)
+        self._timeout: float = float(config.get("timeout", 30.0))
 
     async def start(self) -> None:
-        self._logger.info("Route responder enabled")
+        self._logger.info("Route responder enabled (timeout=%.1fs)", self._timeout)
 
     async def stop(self) -> None:
         pass
@@ -35,20 +43,34 @@ class RoutePlugin(BasePlugin):
         if event.source_plugin == self.plugin_name:
             return
 
-        if event.path:
-            reply = " > ".join(event.path)
-        else:
-            reply = "no path data"
+        key_or_name = event.sender_key_prefix or event.sender_name
+        if not key_or_name:
+            self._logger.info("Route query with no identifiable sender, ignoring")
+            return
 
         if event.event_type == EventType.CONTACT_MESSAGE:
             sender = event.sender_name or event.sender_key_prefix
             self._logger.info("Route query DM from %s", sender)
+        else:
+            channel = event.channel or 0
+            self._logger.info(
+                "Route query from %s on ch%d", event.sender_name, channel
+            )
+
+        result = await self.request_trace(key_or_name, timeout=self._timeout)
+        reply = _format_reply(result)
+
+        if event.event_type == EventType.CONTACT_MESSAGE:
             await self.send_direct_to_mesh(
                 reply,
                 contact_name=event.sender_name or "",
                 contact_key=event.sender_key_prefix or "",
             )
         else:
-            channel = event.channel or 0
-            self._logger.info("Route query from %s on ch%d", event.sender_name, channel)
-            await self.broadcast(reply, channel=channel)
+            await self.broadcast(reply, channel=event.channel or 0)
+
+
+def _format_reply(result: dict) -> str:
+    if not result or "error" in result:
+        return f"trace failed: {result.get('error', 'unknown')}" if result else "trace failed"
+    return str(result.get("path_text") or "trace failed")
