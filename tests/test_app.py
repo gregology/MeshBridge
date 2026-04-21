@@ -204,6 +204,31 @@ async def test_dispatch_handles_missing_event_type(app):
 
 
 @pytest.mark.asyncio
+async def test_dispatch_parses_path_field(app):
+    """_dispatch_to_plugins deserializes the path list into MeshEvent.path."""
+    plugin = AsyncMock()
+    plugin.plugin_name = "test"
+    app._plugins = [plugin]
+
+    payload = json.dumps(
+        {
+            "event_type": "CHANNEL_MESSAGE",
+            "text": "hello",
+            "channel": 0,
+            "source": "mesh",
+            "sender_name": "Node1",
+            "path": ["!abcd1234", "!efgh5678", "!ijkl9012"],
+            "path_len": 3,
+        }
+    ).encode()
+
+    await app._dispatch_to_plugins("meshbridge/inbound/channel/0", payload)
+
+    event = plugin.on_mesh_event.call_args.args[0]
+    assert event.path == ["!abcd1234", "!efgh5678", "!ijkl9012"]
+
+
+@pytest.mark.asyncio
 async def test_dispatch_defaults_source_to_mesh(app):
     """Events without an explicit source field default to 'mesh'."""
     plugin = AsyncMock()
