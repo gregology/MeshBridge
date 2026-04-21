@@ -26,6 +26,7 @@ def _discover_builtin_plugins() -> None:
     from meshbridge.plugins import discord as _  # noqa: F401
     from meshbridge.plugins import homeassistant as _ha  # noqa: F401
     from meshbridge.plugins import ping as _p  # noqa: F401
+    from meshbridge.plugins import route as _r  # noqa: F401
 
 
 def load_plugins(app: App, config: dict) -> list[BasePlugin]:
