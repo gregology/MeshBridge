@@ -107,7 +107,7 @@ Forwards mesh messages to a Discord channel via webhook. Messages appear as:
 
 > **SenderName**: Hello from the mesh!
 
-With optional metadata embeds showing hop count, channel, and sender key.
+With optional metadata embeds showing hop count, channel, sender key, and relay path.
 
 **Setup:** Create a webhook in Discord (Server Settings > Integrations > Webhooks)
 and add the URL to your config.
