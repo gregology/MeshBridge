@@ -400,6 +400,26 @@ async def test_trace_request_timeout(bridge):
 
 
 @pytest.mark.asyncio
+async def test_trace_request_refreshes_contacts_on_miss(bridge):
+    """First lookup misses; after get_contacts refresh the contact resolves."""
+    contact = {"public_key": "e" * 64, "adv_name": "NewNode"}
+    bridge._mc.get_contact_by_key_prefix.return_value = None
+    # First name lookup returns None; after refresh, returns contact.
+    bridge._mc.get_contact_by_name.side_effect = [None, contact]
+    bridge._mc.wait_for_event = AsyncMock(
+        return_value=_make_path_response_event({"out_path_len": 1, "out_path": "11"})
+    )
+
+    payload = json.dumps({"corr_id": "c5", "key_or_name": "NewNode"}).encode()
+    await bridge._on_trace_request("meshbridge/outbound/trace_request", payload)
+
+    bridge._mc.commands.get_contacts.assert_awaited_once()
+    body = bridge._mqtt.publish.await_args.args[1]
+    data = json.loads(body)
+    assert data["path_text"] == "11"
+
+
+@pytest.mark.asyncio
 async def test_trace_request_falls_back_to_name_lookup(bridge):
     """When key_prefix lookup misses, falls back to name lookup."""
     contact = {"public_key": "d" * 64, "adv_name": "ByName"}

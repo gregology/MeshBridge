@@ -94,6 +94,14 @@ class Bridge:
             self._on_trace_request,
         )
 
+        # Load the device's contact list and keep it fresh as nodes advertise.
+        self._mc.auto_update_contacts = True
+        try:
+            await self._mc.ensure_contacts()
+            logger.info("Loaded %d contact(s) from device", len(self._mc.contacts))
+        except Exception:
+            logger.exception("Failed to load contacts on startup")
+
         # Start auto-fetching messages from the device
         await self._mc.start_auto_message_fetching()
 
@@ -248,6 +256,14 @@ class Bridge:
 
     # -- Trace (path discovery) --
 
+    def _resolve_contact(self, key_or_name: str) -> dict | None:
+        """Look up a contact by key prefix first, then by name."""
+        if not self._mc or not key_or_name:
+            return None
+        return self._mc.get_contact_by_key_prefix(
+            key_or_name
+        ) or self._mc.get_contact_by_name(key_or_name)
+
     async def _on_trace_request(self, topic: str, payload: bytes) -> None:
         """Handle a trace request from a plugin.
 
@@ -277,9 +293,15 @@ class Bridge:
         if not self._mc:
             return {"error": "bridge not connected"}
 
-        contact = self._mc.get_contact_by_key_prefix(
-            key_or_name
-        ) or self._mc.get_contact_by_name(key_or_name)
+        contact = self._resolve_contact(key_or_name)
+        if not contact:
+            # Refresh the contact cache and retry once in case the sender
+            # advertised after startup.
+            try:
+                await self._mc.commands.get_contacts()
+            except Exception:
+                logger.exception("Failed to refresh contacts for trace lookup")
+            contact = self._resolve_contact(key_or_name)
         if not contact:
             return {"error": f"unknown contact '{key_or_name}'"}
 
