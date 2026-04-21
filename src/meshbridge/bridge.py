@@ -289,7 +289,12 @@ class Bridge:
         )
 
     async def _run_trace(self, key_or_name: str, timeout: float) -> dict[str, Any]:
-        """Resolve a contact and return a formatted trace result dict."""
+        """Resolve a contact and return a formatted trace result dict.
+
+        Uses the contact's cached ``out_path`` (populated by the firmware and
+        refreshed on advertisements/path-updates). Falls back to an active
+        path discovery only when no path is cached (``out_path_len == -1``).
+        """
         if not self._mc:
             return {"error": "bridge not connected"}
 
@@ -305,6 +310,17 @@ class Bridge:
         if not contact:
             return {"error": f"unknown contact '{key_or_name}'"}
 
+        out_path_len = int(contact.get("out_path_len", -1))
+        logger.info(
+            "Trace lookup for '%s': cached out_path_len=%d",
+            contact.get("adv_name"),
+            out_path_len,
+        )
+
+        if out_path_len >= 0:
+            return _format_cached_path(contact)
+
+        # No cached path: try active discovery as a fallback.
         public_key = contact.get("public_key", "")
         if len(public_key) < 12:
             return {"error": "contact missing public key"}
@@ -322,24 +338,32 @@ class Bridge:
             timeout=timeout,
         )
         if event is None:
-            return {"error": "trace timed out"}
+            return {"error": "no cached path; discovery timed out"}
 
-        return _format_trace_event(event.payload, contact)
+        return _format_trace_payload(event.payload, contact)
 
 
-def _format_trace_event(payload: dict, contact: dict) -> dict[str, Any]:
-    """Format a meshcore PATH_RESPONSE payload into a trace result dict."""
+def _format_cached_path(contact: dict) -> dict[str, Any]:
+    """Format the cached ``out_path`` on a contact record into a result dict."""
+    out_path_len = int(contact.get("out_path_len", 0))
+    out_path_hex = str(contact.get("out_path") or "")
+    return _build_result(out_path_len, out_path_hex, contact.get("adv_name"))
+
+
+def _format_trace_payload(payload: dict, contact: dict) -> dict[str, Any]:
+    """Format a PATH_RESPONSE payload into a result dict."""
     out_path_len = int(payload.get("out_path_len") or 0)
     out_path_hex = str(payload.get("out_path") or "")
-    contact_name = contact.get("adv_name")
+    return _build_result(out_path_len, out_path_hex, contact.get("adv_name"))
 
+
+def _build_result(out_path_len: int, out_path_hex: str, contact_name) -> dict[str, Any]:
     if out_path_len == 0:
         return {
             "path_text": "direct (0 hops)",
             "hops": 0,
             "contact_name": contact_name,
         }
-
     nodes = [out_path_hex[i : i + 2] for i in range(0, out_path_len * 2, 2)]
     return {
         "path_text": " > ".join(nodes),
