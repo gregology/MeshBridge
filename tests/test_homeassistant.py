@@ -25,7 +25,10 @@ def ha_config():
             {
                 "pattern": "(?i)^\\s*(weather|forecast)\\s*$",
                 "entities": {"weather": "weather.home"},
-                "response": "{weather[state]} — {weather[attributes][temperature]}°{weather[attributes][temperature_unit]}",
+                "response": (
+                    "{weather[state]} — {weather[attributes][temperature]}"
+                    "°{weather[attributes][temperature_unit]}"
+                ),
             },
             {
                 "pattern": "(?i)^\\s*(temp|temperature)\\s*$",
@@ -78,6 +81,7 @@ def _mock_session(state_data, status=200):
 
 # -- Metadata --
 
+
 def test_plugin_metadata(ha_plugin):
     assert ha_plugin.plugin_name == "homeassistant"
 
@@ -89,15 +93,18 @@ def test_commands_compiled(ha_plugin):
 
 # -- Pattern matching --
 
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("text", ["weather", "Weather", "WEATHER", " weather ", "forecast"])
 async def test_matches_weather(ha_plugin, text):
     """Weather/forecast triggers the weather command."""
-    ha_plugin._session = _mock_session({
-        "state": "sunny",
-        "attributes": {"temperature": 72, "temperature_unit": "F"},
-        "entity_id": "weather.home",
-    })
+    ha_plugin._session = _mock_session(
+        {
+            "state": "sunny",
+            "attributes": {"temperature": 72, "temperature_unit": "F"},
+            "entity_id": "weather.home",
+        }
+    )
 
     event = MeshEvent(
         event_type=EventType.CHANNEL_MESSAGE,
@@ -115,11 +122,13 @@ async def test_matches_weather(ha_plugin, text):
 @pytest.mark.parametrize("text", ["temp", "temperature", "Temperature", " TEMP "])
 async def test_matches_temp(ha_plugin, text):
     """Temp/temperature triggers the temperature command."""
-    ha_plugin._session = _mock_session({
-        "state": "68",
-        "attributes": {},
-        "entity_id": "sensor.outdoor_temperature",
-    })
+    ha_plugin._session = _mock_session(
+        {
+            "state": "68",
+            "attributes": {},
+            "entity_id": "sensor.outdoor_temperature",
+        }
+    )
 
     event = MeshEvent(
         event_type=EventType.CHANNEL_MESSAGE,
@@ -153,11 +162,13 @@ async def test_ignores_non_matching_messages(ha_plugin, text):
 @pytest.mark.asyncio
 async def test_responds_to_dm_with_direct_reply(ha_plugin):
     """DM with a matching command gets a direct reply, not a broadcast."""
-    ha_plugin._session = _mock_session({
-        "state": "sunny",
-        "attributes": {"temperature": 72, "temperature_unit": "F"},
-        "entity_id": "weather.home",
-    })
+    ha_plugin._session = _mock_session(
+        {
+            "state": "sunny",
+            "attributes": {"temperature": 72, "temperature_unit": "F"},
+            "entity_id": "weather.home",
+        }
+    )
     event = MeshEvent(
         event_type=EventType.CONTACT_MESSAGE,
         text="weather",
@@ -167,7 +178,9 @@ async def test_responds_to_dm_with_direct_reply(ha_plugin):
     await ha_plugin.on_mesh_event(event)
     ha_plugin._app.broadcast.assert_not_awaited()
     ha_plugin._app.send_direct_to_mesh.assert_awaited_once_with(
-        text="sunny — 72°F", contact_name="TestNode", source_plugin="homeassistant",
+        text="sunny — 72°F",
+        contact_name="TestNode",
+        source_plugin="homeassistant",
         contact_key="abc123",
     )
 
@@ -198,6 +211,7 @@ async def test_ignores_empty_text(ha_plugin):
 
 # -- First match wins --
 
+
 @pytest.mark.asyncio
 async def test_first_match_wins(mock_app):
     """When multiple patterns could match, only the first triggers."""
@@ -206,8 +220,16 @@ async def test_first_match_wins(mock_app):
         "url": "http://ha.local:8123",
         "token": "t",
         "commands": [
-            {"pattern": "(?i)temp", "entities": {"t": "sensor.first"}, "response": "first: {t[state]}"},
-            {"pattern": "(?i)temperature", "entities": {"t": "sensor.second"}, "response": "second: {t[state]}"},
+            {
+                "pattern": "(?i)temp",
+                "entities": {"t": "sensor.first"},
+                "response": "first: {t[state]}",
+            },
+            {
+                "pattern": "(?i)temperature",
+                "entities": {"t": "sensor.second"},
+                "response": "second: {t[state]}",
+            },
         ],
     }
     plugin = HomeAssistantPlugin(mock_app, config)
@@ -227,6 +249,7 @@ async def test_first_match_wins(mock_app):
 
 # -- Response formatting --
 
+
 def test_format_simple():
     result = HomeAssistantPlugin._format_response(
         "{t[state]}", {"t": {"state": "sunny", "attributes": {}}}
@@ -243,7 +266,9 @@ def test_format_nested_attributes():
 
 
 def test_format_numeric_rounding():
-    context = {"pm25": {"state": "8.60000038146973", "attributes": {"unit_of_measurement": "µg/m³"}}}
+    context = {
+        "pm25": {"state": "8.60000038146973", "attributes": {"unit_of_measurement": "µg/m³"}}
+    }
     result = HomeAssistantPlugin._format_response(
         "PM2.5: {pm25[state]:.1f}{pm25[attributes][unit_of_measurement]}", context
     )
@@ -279,6 +304,7 @@ def test_format_default_response(mock_app):
 
 # -- HA API error handling --
 
+
 @pytest.mark.asyncio
 async def test_api_error_does_not_broadcast(ha_plugin):
     """When HA returns an error, no message is broadcast."""
@@ -295,6 +321,7 @@ async def test_api_error_does_not_broadcast(ha_plugin):
 
 
 # -- Channel forwarding --
+
 
 @pytest.mark.asyncio
 async def test_responds_on_correct_channel(ha_plugin):
@@ -315,6 +342,7 @@ async def test_responds_on_correct_channel(ha_plugin):
 
 # -- Multi-entity commands --
 
+
 @pytest.fixture
 def multi_plugin(mock_app):
     config = {
@@ -328,7 +356,10 @@ def multi_plugin(mock_app):
                     "pm25": "sensor.pm25",
                     "pm10": "sensor.pm10",
                 },
-                "response": "Air: PM2.5 {pm25[state]}{pm25[attributes][unit_of_measurement]} | PM10 {pm10[state]}{pm10[attributes][unit_of_measurement]}",
+                "response": (
+                    "Air: PM2.5 {pm25[state]}{pm25[attributes][unit_of_measurement]}"
+                    " | PM10 {pm10[state]}{pm10[attributes][unit_of_measurement]}"
+                ),
             },
         ],
     }
@@ -339,10 +370,20 @@ def multi_plugin(mock_app):
 @pytest.mark.parametrize("text", ["air quality", "Air Quality", "AQI", " aqi "])
 async def test_multi_entity_command(multi_plugin, text):
     """Multi-entity command fetches both and formats response."""
-    multi_plugin._session = _mock_session([
-        {"state": "12.5", "attributes": {"unit_of_measurement": "µg/m³"}, "entity_id": "sensor.pm25"},
-        {"state": "28.0", "attributes": {"unit_of_measurement": "µg/m³"}, "entity_id": "sensor.pm10"},
-    ])
+    multi_plugin._session = _mock_session(
+        [
+            {
+                "state": "12.5",
+                "attributes": {"unit_of_measurement": "µg/m³"},
+                "entity_id": "sensor.pm25",
+            },
+            {
+                "state": "28.0",
+                "attributes": {"unit_of_measurement": "µg/m³"},
+                "entity_id": "sensor.pm10",
+            },
+        ]
+    )
 
     event = MeshEvent(
         event_type=EventType.CHANNEL_MESSAGE,
@@ -396,7 +437,8 @@ def test_multi_entity_format():
         "pm10": {"state": "25", "attributes": {"unit_of_measurement": "µg/m³"}},
     }
     result = HomeAssistantPlugin._format_response(
-        "PM2.5: {pm25[state]}{pm25[attributes][unit_of_measurement]} PM10: {pm10[state]}{pm10[attributes][unit_of_measurement]}",
+        "PM2.5: {pm25[state]}{pm25[attributes][unit_of_measurement]}"
+        " PM10: {pm10[state]}{pm10[attributes][unit_of_measurement]}",
         context,
     )
     assert result == "PM2.5: 10µg/m³ PM10: 25µg/m³"

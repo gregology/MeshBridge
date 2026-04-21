@@ -62,6 +62,10 @@ plugins:
     # Responds with "pong" when someone sends "ping", "radio check", etc.
     enabled: true
 
+  route:
+    # Responds with the message path when someone sends "route", "path", or "traceroute".
+    enabled: true
+
   homeassistant:
     enabled: false
     # Home Assistant base URL

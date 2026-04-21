@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -84,6 +84,7 @@ def test_load_survives_plugin_init_error(mock_app):
 
     class _BadPlugin(BasePlugin):
         plugin_name = "bad"
+
         async def start(self): ...
         async def stop(self): ...
         async def on_mesh_event(self, event): ...

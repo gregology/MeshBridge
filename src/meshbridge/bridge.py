@@ -30,6 +30,7 @@ _SERIALIZE_FIELDS = (
     "sender_key_prefix",
     "sender_timestamp",
     "path_len",
+    "path",
     "telemetry",
     "node_name",
     "source_plugin",
@@ -153,6 +154,8 @@ class Bridge:
             ):
                 sender_name, text = text.split(": ", 1)
 
+            path = payload.get("path") or payload.get("out_path")
+
             return MeshEvent(
                 event_type=event_type,
                 text=text,
@@ -161,6 +164,7 @@ class Bridge:
                 sender_key_prefix=payload.get("pubkey_prefix"),
                 sender_timestamp=payload.get("sender_timestamp"),
                 path_len=payload.get("path_len"),
+                path=path if isinstance(path, list) else None,
                 raw=payload,
             )
         elif event_type == EventType.TELEMETRY:
@@ -218,7 +222,12 @@ class Bridge:
             contact_name = data.get("contact_name")
             contact_key = data.get("contact_key")
             source = data.get("source_plugin", "unknown")
-            logger.info("Outbound DM to %s from %s: %s", contact_name or contact_key, source, text[:80])
+            logger.info(
+                "Outbound DM to %s from %s: %s",
+                contact_name or contact_key,
+                source,
+                text[:80],
+            )
             if not self._mc:
                 return
             # Resolve destination: try contact name, then key prefix lookup,

@@ -152,9 +152,7 @@ class HomeAssistantPlugin(BasePlugin):
             ) as resp:
                 if resp.status == 200:
                     return await resp.json()
-                self._logger.warning(
-                    "HA API returned %d for %s", resp.status, entity_id
-                )
+                self._logger.warning("HA API returned %d for %s", resp.status, entity_id)
         except aiohttp.ClientError:
             self._logger.exception("Failed to reach Home Assistant at %s", self._url)
         return None
