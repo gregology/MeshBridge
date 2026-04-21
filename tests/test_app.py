@@ -204,31 +204,6 @@ async def test_dispatch_handles_missing_event_type(app):
 
 
 @pytest.mark.asyncio
-async def test_dispatch_parses_path_field(app):
-    """_dispatch_to_plugins deserializes the path list into MeshEvent.path."""
-    plugin = AsyncMock()
-    plugin.plugin_name = "test"
-    app._plugins = [plugin]
-
-    payload = json.dumps(
-        {
-            "event_type": "CHANNEL_MESSAGE",
-            "text": "hello",
-            "channel": 0,
-            "source": "mesh",
-            "sender_name": "Node1",
-            "path": ["!abcd1234", "!efgh5678", "!ijkl9012"],
-            "path_len": 3,
-        }
-    ).encode()
-
-    await app._dispatch_to_plugins("meshbridge/inbound/channel/0", payload)
-
-    event = plugin.on_mesh_event.call_args.args[0]
-    assert event.path == ["!abcd1234", "!efgh5678", "!ijkl9012"]
-
-
-@pytest.mark.asyncio
 async def test_dispatch_defaults_source_to_mesh(app):
     """Events without an explicit source field default to 'mesh'."""
     plugin = AsyncMock()
@@ -246,3 +221,59 @@ async def test_dispatch_defaults_source_to_mesh(app):
 
     event = plugin.on_mesh_event.call_args.args[0]
     assert event.source == "mesh"
+
+
+# -- request_trace --
+
+
+@pytest.mark.asyncio
+async def test_request_trace_publishes_and_resolves(app):
+    """request_trace publishes an outbound request and resolves when result arrives."""
+    import asyncio
+
+    task = asyncio.create_task(app.request_trace("abc123", timeout=5.0))
+    # Let request_trace run far enough to publish and register the future.
+    await asyncio.sleep(0)
+
+    app._mqtt.publish.assert_awaited_once()
+    topic, body = app._mqtt.publish.await_args.args
+    assert topic == "meshbridge/outbound/trace_request"
+    req = json.loads(body)
+    assert req["key_or_name"] == "abc123"
+    assert req["timeout"] == 5.0
+    corr_id = req["corr_id"]
+
+    result_payload = json.dumps(
+        {"corr_id": corr_id, "path_text": "aa > bb", "hops": 2}
+    ).encode()
+    await app._on_trace_result(
+        f"meshbridge/inbound/trace_result/{corr_id}", result_payload
+    )
+
+    result = await task
+    assert result["path_text"] == "aa > bb"
+    assert corr_id not in app._pending_traces
+
+
+@pytest.mark.asyncio
+async def test_request_trace_times_out(app):
+    """request_trace returns an error dict when no response arrives in time."""
+    result = await app.request_trace("ghost", timeout=0.0)
+    assert result == {"error": "trace timed out"}
+
+
+@pytest.mark.asyncio
+async def test_on_trace_result_ignores_unknown_corr_id(app):
+    """Results for unknown correlation ids are silently dropped."""
+    payload = json.dumps({"corr_id": "nobody", "path_text": "x"}).encode()
+    await app._on_trace_result("meshbridge/inbound/trace_result/nobody", payload)
+
+
+@pytest.mark.asyncio
+async def test_request_trace_without_mqtt_returns_error():
+    """With no MQTT client, request_trace errors cleanly."""
+    a = App()
+    a._config = {"mqtt": {}}
+    a._mqtt = None
+    result = await a.request_trace("anything")
+    assert result == {"error": "mqtt not connected"}

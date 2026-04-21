@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import signal
+import uuid
 
 from meshbridge.bridge import Bridge
 from meshbridge.config import load_config
@@ -31,6 +32,7 @@ class App:
         self._bridge: Bridge | None = None
         self._plugins: list[BasePlugin] = []
         self._shutdown_event = asyncio.Event()
+        self._pending_traces: dict[str, asyncio.Future[dict]] = {}
 
     async def run(self) -> None:
         """Main entry point. Runs until SIGINT/SIGTERM."""
@@ -57,6 +59,10 @@ class App:
 
         # 4. Subscribe to inbound topics to dispatch to plugins
         topic_prefix = self._config["mqtt"].get("topic_prefix", "meshbridge")
+        await self._mqtt.subscribe(
+            f"{topic_prefix}/inbound/trace_result/+",
+            self._on_trace_result,
+        )
         await self._mqtt.subscribe(
             f"{topic_prefix}/inbound/#",
             self._dispatch_to_plugins,
@@ -139,7 +145,6 @@ class App:
                 sender_key_prefix=data.get("sender_key_prefix"),
                 sender_timestamp=data.get("sender_timestamp"),
                 path_len=data.get("path_len"),
-                path=data.get("path"),
                 telemetry=data.get("telemetry"),
                 node_name=data.get("node_name"),
                 source_plugin=data.get("source_plugin"),
@@ -161,6 +166,49 @@ class App:
             f"{prefix}/outbound/channel/{channel}",
             json.dumps({"text": text, "source_plugin": source_plugin}),
         )
+
+    async def request_trace(
+        self, key_or_name: str, timeout: float = 30.0
+    ) -> dict:
+        """Ask the bridge to run a path discovery and return the result.
+
+        Publishes to ``outbound/trace_request``, awaits the matching
+        ``inbound/trace_result/{corr_id}`` message. Returns a dict with
+        either ``path_text``/``hops``/``contact_name`` on success or ``error``.
+        """
+        if not self._mqtt:
+            return {"error": "mqtt not connected"}
+
+        corr_id = uuid.uuid4().hex
+        future: asyncio.Future[dict] = asyncio.get_event_loop().create_future()
+        self._pending_traces[corr_id] = future
+
+        prefix = self._config["mqtt"].get("topic_prefix", "meshbridge")
+        await self._mqtt.publish(
+            f"{prefix}/outbound/trace_request",
+            json.dumps(
+                {"corr_id": corr_id, "key_or_name": key_or_name, "timeout": timeout}
+            ),
+        )
+
+        try:
+            return await asyncio.wait_for(future, timeout=timeout + 5.0)
+        except asyncio.TimeoutError:
+            return {"error": "trace timed out"}
+        finally:
+            self._pending_traces.pop(corr_id, None)
+
+    async def _on_trace_result(self, topic: str, payload: bytes) -> None:
+        """Resolve the pending trace future matching this correlation id."""
+        try:
+            data = json.loads(payload)
+        except json.JSONDecodeError:
+            logger.exception("Malformed trace_result on %s", topic)
+            return
+        corr_id = data.get("corr_id", "")
+        future = self._pending_traces.get(corr_id)
+        if future and not future.done():
+            future.set_result(data)
 
     async def send_direct_to_mesh(
         self,

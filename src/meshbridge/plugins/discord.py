@@ -153,8 +153,6 @@ class DiscordPlugin(BasePlugin):
                 fields.append({"name": "Channel", "value": str(event.channel), "inline": True})
             if event.sender_key_prefix:
                 fields.append({"name": "Key", "value": event.sender_key_prefix, "inline": True})
-            if event.path:
-                fields.append({"name": "Path", "value": " > ".join(event.path), "inline": False})
             if fields:
                 webhook_data["embeds"] = [{"fields": fields, "color": 0x00B0F0}]
 

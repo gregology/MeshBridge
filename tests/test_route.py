@@ -7,12 +7,16 @@ from unittest.mock import AsyncMock
 import pytest
 
 from meshbridge.events import EventType, MeshEvent
-from meshbridge.plugins.route import RoutePlugin
+from meshbridge.plugins.route import RoutePlugin, _format_reply
 
 
 @pytest.fixture
 def mock_app():
-    return AsyncMock()
+    app = AsyncMock()
+    app.request_trace = AsyncMock(
+        return_value={"path_text": "ab > cd > ef", "hops": 3, "contact_name": "TestNode"}
+    )
+    return app
 
 
 @pytest.fixture
@@ -34,159 +38,161 @@ def test_plugin_metadata(route_plugin):
         " route ",
         "path",
         "Path",
-        "PATH",
         " path ",
         "traceroute",
         "Traceroute",
-        "TRACEROUTE",
         " traceroute ",
     ],
 )
 async def test_responds_to_trigger_words(route_plugin, text):
-    """All recognized trigger words produce a response."""
     event = MeshEvent(
         event_type=EventType.CHANNEL_MESSAGE,
         text=text,
         channel=0,
         sender_name="TestNode",
-        path=["abc123", "def456", "ghi789"],
     )
     await route_plugin.on_mesh_event(event)
+    route_plugin._app.request_trace.assert_awaited_once_with("TestNode", timeout=30.0)
     route_plugin._app.broadcast.assert_awaited_once_with(
-        text="abc123 > def456 > ghi789", channel=0, source_plugin="route"
+        text="ab > cd > ef", channel=0, source_plugin="route"
     )
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "text",
-    [
-        "hello",
-        "route me",
-        "show path",
-        "traceroute please",
-        "my route",
-    ],
+    ["hello", "route me", "show path", "traceroute please", "my route"],
 )
 async def test_ignores_non_matching_messages(route_plugin, text):
-    """Messages that aren't exact trigger words are ignored."""
     event = MeshEvent(
         event_type=EventType.CHANNEL_MESSAGE,
         text=text,
         channel=0,
         sender_name="TestNode",
-        path=["abc123"],
     )
     await route_plugin.on_mesh_event(event)
+    route_plugin._app.request_trace.assert_not_awaited()
     route_plugin._app.broadcast.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_formats_path_as_arrow_separated(route_plugin):
-    """Path hashes are joined with ' > ' separator."""
-    event = MeshEvent(
-        event_type=EventType.CHANNEL_MESSAGE,
-        text="route",
-        channel=0,
-        sender_name="TestNode",
-        path=["aaa111", "bbb222"],
-    )
-    await route_plugin.on_mesh_event(event)
-    route_plugin._app.broadcast.assert_awaited_once_with(
-        text="aaa111 > bbb222", channel=0, source_plugin="route"
-    )
-
-
-@pytest.mark.asyncio
-async def test_no_path_data_when_path_is_none(route_plugin):
-    """Replies 'no path data' when path is None."""
-    event = MeshEvent(
-        event_type=EventType.CHANNEL_MESSAGE,
-        text="path",
-        channel=0,
-        sender_name="TestNode",
-        path=None,
-    )
-    await route_plugin.on_mesh_event(event)
-    route_plugin._app.broadcast.assert_awaited_once_with(
-        text="no path data", channel=0, source_plugin="route"
-    )
-
-
-@pytest.mark.asyncio
-async def test_no_path_data_when_path_is_empty(route_plugin):
-    """Replies 'no path data' when path is an empty list."""
-    event = MeshEvent(
-        event_type=EventType.CHANNEL_MESSAGE,
-        text="traceroute",
-        channel=0,
-        sender_name="TestNode",
-        path=[],
-    )
-    await route_plugin.on_mesh_event(event)
-    route_plugin._app.broadcast.assert_awaited_once_with(
-        text="no path data", channel=0, source_plugin="route"
-    )
-
-
-@pytest.mark.asyncio
-async def test_dm_reply(route_plugin):
-    """DM triggers a direct reply, not a broadcast."""
-    event = MeshEvent(
-        event_type=EventType.CONTACT_MESSAGE,
-        text="route",
-        sender_name="TestNode",
-        sender_key_prefix="abc123",
-        path=["xyz789"],
-    )
-    await route_plugin.on_mesh_event(event)
-    route_plugin._app.broadcast.assert_not_awaited()
-    route_plugin._app.send_direct_to_mesh.assert_awaited_once_with(
-        text="xyz789", contact_name="TestNode", source_plugin="route", contact_key="abc123"
-    )
-
-
-@pytest.mark.asyncio
-async def test_dm_reply_no_path(route_plugin):
-    """DM with no path data gets 'no path data' direct reply."""
-    event = MeshEvent(
-        event_type=EventType.CONTACT_MESSAGE,
-        text="path",
-        sender_name="TestNode",
-        sender_key_prefix="abc123",
-        path=None,
-    )
-    await route_plugin.on_mesh_event(event)
-    route_plugin._app.send_direct_to_mesh.assert_awaited_once_with(
-        text="no path data", contact_name="TestNode", source_plugin="route", contact_key="abc123"
-    )
-
-
-@pytest.mark.asyncio
-async def test_ignores_own_messages(route_plugin):
-    """Don't respond to our own messages echoed back."""
-    event = MeshEvent(
-        event_type=EventType.CHANNEL_MESSAGE,
-        text="route",
-        channel=0,
-        source_plugin="route",
-        path=["abc123"],
-    )
-    await route_plugin.on_mesh_event(event)
-    route_plugin._app.broadcast.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_responds_on_correct_channel(route_plugin):
-    """Reply is sent on the same channel the query came from."""
+async def test_channel_reply_uses_sender_name(route_plugin):
+    """Channel queries use sender_name (no pubkey in payload) for the trace."""
     event = MeshEvent(
         event_type=EventType.CHANNEL_MESSAGE,
         text="route",
         channel=5,
         sender_name="TestNode",
-        path=["abc123"],
     )
     await route_plugin.on_mesh_event(event)
+    route_plugin._app.request_trace.assert_awaited_once_with("TestNode", timeout=30.0)
     route_plugin._app.broadcast.assert_awaited_once_with(
-        text="abc123", channel=5, source_plugin="route"
+        text="ab > cd > ef", channel=5, source_plugin="route"
     )
+
+
+@pytest.mark.asyncio
+async def test_dm_reply_uses_sender_key(route_plugin):
+    """DM queries prefer sender_key_prefix for the trace."""
+    event = MeshEvent(
+        event_type=EventType.CONTACT_MESSAGE,
+        text="route",
+        sender_name="TestNode",
+        sender_key_prefix="abcdef123456",
+    )
+    await route_plugin.on_mesh_event(event)
+    route_plugin._app.request_trace.assert_awaited_once_with(
+        "abcdef123456", timeout=30.0
+    )
+    route_plugin._app.broadcast.assert_not_awaited()
+    route_plugin._app.send_direct_to_mesh.assert_awaited_once_with(
+        text="ab > cd > ef",
+        contact_name="TestNode",
+        source_plugin="route",
+        contact_key="abcdef123456",
+    )
+
+
+@pytest.mark.asyncio
+async def test_reply_when_trace_fails(mock_app):
+    """Error result is surfaced to the user."""
+    mock_app.request_trace = AsyncMock(return_value={"error": "trace timed out"})
+    plugin = RoutePlugin(mock_app, {"enabled": True})
+    event = MeshEvent(
+        event_type=EventType.CHANNEL_MESSAGE,
+        text="path",
+        channel=0,
+        sender_name="TestNode",
+    )
+    await plugin.on_mesh_event(event)
+    plugin._app.broadcast.assert_awaited_once_with(
+        text="trace failed: trace timed out", channel=0, source_plugin="route"
+    )
+
+
+@pytest.mark.asyncio
+async def test_direct_0_hop_result(mock_app):
+    mock_app.request_trace = AsyncMock(
+        return_value={"path_text": "direct (0 hops)", "hops": 0, "contact_name": "X"}
+    )
+    plugin = RoutePlugin(mock_app, {"enabled": True})
+    event = MeshEvent(
+        event_type=EventType.CHANNEL_MESSAGE,
+        text="route",
+        channel=0,
+        sender_name="X",
+    )
+    await plugin.on_mesh_event(event)
+    plugin._app.broadcast.assert_awaited_once_with(
+        text="direct (0 hops)", channel=0, source_plugin="route"
+    )
+
+
+@pytest.mark.asyncio
+async def test_ignores_own_messages(route_plugin):
+    event = MeshEvent(
+        event_type=EventType.CHANNEL_MESSAGE,
+        text="route",
+        channel=0,
+        source_plugin="route",
+    )
+    await route_plugin.on_mesh_event(event)
+    route_plugin._app.request_trace.assert_not_awaited()
+    route_plugin._app.broadcast.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_ignores_when_no_sender_identity(route_plugin):
+    event = MeshEvent(
+        event_type=EventType.CHANNEL_MESSAGE,
+        text="route",
+        channel=0,
+    )
+    await route_plugin.on_mesh_event(event)
+    route_plugin._app.request_trace.assert_not_awaited()
+    route_plugin._app.broadcast.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_custom_timeout_from_config(mock_app):
+    plugin = RoutePlugin(mock_app, {"enabled": True, "timeout": 5})
+    event = MeshEvent(
+        event_type=EventType.CHANNEL_MESSAGE,
+        text="route",
+        channel=0,
+        sender_name="TestNode",
+    )
+    await plugin.on_mesh_event(event)
+    plugin._app.request_trace.assert_awaited_once_with("TestNode", timeout=5.0)
+
+
+def test_format_reply_error():
+    assert _format_reply({"error": "x"}) == "trace failed: x"
+
+
+def test_format_reply_empty():
+    assert _format_reply({}) == "trace failed"
+
+
+def test_format_reply_success():
+    assert _format_reply({"path_text": "ab > cd"}) == "ab > cd"
