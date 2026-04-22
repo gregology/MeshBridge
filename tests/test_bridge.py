@@ -436,6 +436,47 @@ async def test_probe_path_response_fires(bridge):
 
 
 @pytest.mark.asyncio
+async def test_probe_trace_data_fires(bridge):
+    """TRACE_DATA firing returns hop hashes with per-hop SNRs."""
+    from meshcore import EventType as MCEventType
+
+    contact = {
+        "public_key": "c" * 64,
+        "adv_name": "TracedNode",
+        "out_path_len": -1,
+        "out_path": "",
+    }
+    bridge._mc.get_contact_by_key_prefix.return_value = contact
+    bridge._mc.wait_for_event = AsyncMock(
+        side_effect=_wait_for_selector(
+            {
+                MCEventType.PATH_RESPONSE: None,
+                MCEventType.PATH_UPDATE: None,
+                MCEventType.ADVERTISEMENT: None,
+                MCEventType.TRACE_DATA: _make_event(
+                    MCEventType.TRACE_DATA,
+                    {
+                        "path": [
+                            {"hash": "ab", "snr": -6.0},
+                            {"hash": "cd", "snr": -12.5},
+                            {"snr": -4.25},  # final node (us), no hash
+                        ]
+                    },
+                ),
+            }
+        )
+    )
+
+    payload = json.dumps({"corr_id": "tr1", "key_or_name": "c" * 12}).encode()
+    await bridge._on_trace_request("meshbridge/outbound/trace_request", payload)
+
+    bridge._mc.commands.send_trace.assert_awaited_once()
+    data = json.loads(bridge._mqtt.publish.await_args.args[1])
+    assert data["path_text"] == "ab@-6.0dB > cd@-12.5dB"
+    assert data["hops"] == 2
+
+
+@pytest.mark.asyncio
 async def test_probe_path_update_refreshes_contact(bridge):
     """PATH_UPDATE firing triggers contact refresh and returns the newly-cached path."""
     from meshcore import EventType as MCEventType

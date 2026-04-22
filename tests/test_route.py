@@ -53,7 +53,7 @@ async def test_responds_to_trigger_words(route_plugin, text):
     )
     await route_plugin.on_mesh_event(event)
     route_plugin._app.request_trace.assert_awaited_once_with(
-        "TestNode", timeout=30.0, inbound_path_len=None
+        "TestNode", timeout=10.0, inbound_path_len=None
     )
     route_plugin._app.broadcast.assert_awaited_once_with(
         text="ab > cd > ef", channel=0, source_plugin="route"
@@ -88,7 +88,7 @@ async def test_channel_reply_uses_sender_name(route_plugin):
     )
     await route_plugin.on_mesh_event(event)
     route_plugin._app.request_trace.assert_awaited_once_with(
-        "TestNode", timeout=30.0, inbound_path_len=None
+        "TestNode", timeout=10.0, inbound_path_len=None
     )
     route_plugin._app.broadcast.assert_awaited_once_with(
         text="ab > cd > ef", channel=5, source_plugin="route"
@@ -106,7 +106,7 @@ async def test_dm_reply_uses_sender_key(route_plugin):
     )
     await route_plugin.on_mesh_event(event)
     route_plugin._app.request_trace.assert_awaited_once_with(
-        "abcdef123456", timeout=30.0, inbound_path_len=None
+        "abcdef123456", timeout=10.0, inbound_path_len=None
     )
     route_plugin._app.broadcast.assert_not_awaited()
     route_plugin._app.send_direct_to_mesh.assert_awaited_once_with(

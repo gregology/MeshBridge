@@ -67,8 +67,9 @@ plugins:
     # path discovery against that sender and replies with the discovered
     # hop hashes. Requires the sender to be a known contact on the device.
     enabled: true
-    # How long (seconds) to wait for the path-discovery response.
-    timeout: 30
+    # How long (seconds) to wait for the path-discovery response. 10s is
+    # plenty in practice — if a response isn't back by then it won't arrive.
+    timeout: 10
 
   homeassistant:
     enabled: false

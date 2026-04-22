@@ -27,7 +27,7 @@ class RoutePlugin(BasePlugin):
 
     def __init__(self, app, config: dict) -> None:
         super().__init__(app, config)
-        self._timeout: float = float(config.get("timeout", 30.0))
+        self._timeout: float = float(config.get("timeout", 10.0))
 
     async def start(self) -> None:
         self._logger.info("Route responder enabled (timeout=%.1fs)", self._timeout)

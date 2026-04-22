@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import random
+import time
 from typing import Any
 
 from meshcore import EventType as MCEventType
@@ -363,11 +365,17 @@ class Bridge:
     async def _probe_path(self, contact: dict, timeout: float) -> dict | None:
         """Race multiple discovery mechanisms to learn a path for ``contact``.
 
-        Starts wait_for_event listeners for PATH_RESPONSE, PATH_UPDATE, and
-        ADVERTISEMENT (all filtered to this contact), then fires both
-        ``send_path_discovery`` and ``send_statusreq`` probes. Returns a
-        formatted result dict if any listener produces a usable path, or
-        None on overall timeout.
+        Listeners (all filtered to this contact / our trace tag):
+            PATH_RESPONSE, PATH_UPDATE, ADVERTISEMENT, TRACE_DATA
+
+        Probes fired in parallel:
+            send_path_discovery, send_statusreq, send_trace (no path, random tag)
+
+        Also installs a broad "observe" subscription for the probe window so
+        every meshcore event we hear gets logged for debugging.
+
+        Returns a formatted result dict if any listener produces a usable
+        path, or None on overall timeout.
         """
         mc = self._mc
         if mc is None:
@@ -376,6 +384,20 @@ class Bridge:
         public_key = contact["public_key"]
         pubkey_pre = public_key[:12]
         adv_name = contact.get("adv_name")
+        trace_tag = random.randint(1, 0xFFFFFFFF)
+
+        logger.info(
+            "=== Probe experiment START name='%s' pubkey=%s timeout=%.1fs trace_tag=0x%08x ===",
+            adv_name,
+            public_key,
+            timeout,
+            trace_tag,
+        )
+        logger.info("Contact record: %s", _redact_contact(contact))
+
+        # Install a broad observer that logs every meshcore event during the
+        # probe window. Very useful for seeing unexpected traffic.
+        observer_sub = mc.subscribe(None, self._observe_event)
 
         # Create listeners BEFORE sending probes so no event is missed.
         response_task = asyncio.create_task(
@@ -402,28 +424,46 @@ class Bridge:
             ),
             name="wait_advertisement",
         )
-        listeners = [response_task, update_task, advert_task]
-
+        trace_task = asyncio.create_task(
+            mc.wait_for_event(
+                MCEventType.TRACE_DATA,
+                attribute_filters={"tag": trace_tag},
+                timeout=timeout,
+            ),
+            name="wait_trace_data",
+        )
+        listeners = [response_task, update_task, advert_task, trace_task]
         logger.info(
-            "Probe experiment for '%s' pubkey=%s: firing path_discovery + "
-            "statusreq, listeners armed for PATH_RESPONSE|PATH_UPDATE|ADVERTISEMENT "
-            "(timeout=%.1fs)",
-            adv_name,
-            public_key[:16],
-            timeout,
+            "Listeners armed: PATH_RESPONSE[pubkey_pre=%s] PATH_UPDATE[public_key=%s] "
+            "ADVERTISEMENT[public_key=%s] TRACE_DATA[tag=0x%08x]",
+            pubkey_pre,
+            public_key,
+            public_key,
+            trace_tag,
         )
 
-        try:
-            send_result = await mc.commands.send_path_discovery(contact)
-            logger.info("send_path_discovery result: type=%s", getattr(send_result, "type", None))
-        except Exception:
-            logger.exception("send_path_discovery failed")
+        probes = [
+            ("send_path_discovery", lambda: mc.commands.send_path_discovery(contact)),
+            ("send_statusreq", lambda: mc.commands.send_statusreq(contact)),
+            ("send_trace", lambda: mc.commands.send_trace(tag=trace_tag)),
+        ]
 
-        try:
-            stat_result = await mc.commands.send_statusreq(contact)
-            logger.info("send_statusreq result: type=%s", getattr(stat_result, "type", None))
-        except Exception:
-            logger.exception("send_statusreq failed")
+        t_start = time.monotonic()
+        for name, fn in probes:
+            t0 = time.monotonic()
+            try:
+                result = await fn()
+                dt_ms = (time.monotonic() - t0) * 1000
+                logger.info(
+                    "Probe %s -> sent in %.1fms; result type=%s payload=%s attrs=%s",
+                    name,
+                    dt_ms,
+                    getattr(result, "type", None),
+                    getattr(result, "payload", None),
+                    getattr(result, "attributes", None),
+                )
+            except Exception:
+                logger.exception("Probe %s raised", name)
 
         try:
             done, pending = await asyncio.wait(
@@ -433,7 +473,17 @@ class Bridge:
             for task in listeners:
                 if not task.done():
                     task.cancel()
+            observer_sub.unsubscribe()
 
+        elapsed_ms = (time.monotonic() - t_start) * 1000
+        logger.info(
+            "asyncio.wait returned after %.1fms: %d done, %d pending",
+            elapsed_ms,
+            len(done),
+            len(pending),
+        )
+
+        result: dict | None = None
         for task in done:
             if task.cancelled():
                 continue
@@ -443,22 +493,34 @@ class Bridge:
                 logger.exception("Listener %s raised", task.get_name())
                 continue
             if event is None:
-                logger.info("Listener %s timed out", task.get_name())
+                logger.info("Listener %s finished with None (timeout)", task.get_name())
                 continue
 
             mc_type = getattr(event, "type", None)
             attrs = getattr(event, "attributes", None)
+            payload = getattr(event, "payload", None)
             logger.info(
-                "Probe listener %s fired: type=%s attributes=%s",
+                "Listener %s FIRED: type=%s attributes=%s payload=%s",
                 task.get_name(),
                 mc_type,
                 attrs,
+                payload,
             )
 
-            if mc_type == MCEventType.PATH_RESPONSE:
-                return _format_trace_payload(event.payload, contact)
+            if result is not None:
+                continue  # already have a result, but keep logging others
 
-            # PATH_UPDATE/ADVERTISEMENT don't carry the path directly. Refresh
+            if mc_type == MCEventType.PATH_RESPONSE:
+                result = _format_trace_payload(payload or {}, contact)
+                logger.info("Resolved via PATH_RESPONSE: %s", result)
+                continue
+
+            if mc_type == MCEventType.TRACE_DATA:
+                result = _format_trace_data(payload or {}, contact)
+                logger.info("Resolved via TRACE_DATA: %s", result)
+                continue
+
+            # PATH_UPDATE / ADVERTISEMENT don't carry path directly. Refresh
             # the contact cache to pick up any newly-learned out_path.
             try:
                 await mc.commands.get_contacts()
@@ -475,12 +537,27 @@ class Bridge:
                 refreshed.get("out_path"),
             )
             if refreshed_len >= 0:
-                return _format_cached_path(refreshed)
+                result = _format_cached_path(refreshed)
+                logger.info("Resolved via cache refresh: %s", result)
 
-        logger.info(
-            "Probe experiment for '%s' exhausted with no usable result", adv_name
-        )
-        return None
+        if result is None:
+            logger.info("=== Probe experiment END name='%s' NO RESULT ===", adv_name)
+        else:
+            logger.info("=== Probe experiment END name='%s' -> %s ===", adv_name, result)
+        return result
+
+    async def _observe_event(self, event) -> None:
+        """Log every meshcore event seen during a probe window."""
+        try:
+            payload = getattr(event, "payload", None)
+            logger.info(
+                "observed event: type=%s attributes=%s payload=%s",
+                getattr(event, "type", None),
+                getattr(event, "attributes", None),
+                _summarize_payload(payload),
+            )
+        except Exception:
+            logger.exception("observer failed to format event")
 
 
 def _format_cached_path(contact: dict) -> dict[str, Any]:
@@ -495,6 +572,60 @@ def _format_trace_payload(payload: dict, contact: dict) -> dict[str, Any]:
     out_path_len = int(payload.get("out_path_len") or 0)
     out_path_hex = str(payload.get("out_path") or "")
     return _build_result(out_path_len, out_path_hex, contact.get("adv_name"))
+
+
+def _format_trace_data(payload: dict, contact: dict) -> dict[str, Any]:
+    """Format a TRACE_DATA payload (hop hashes + per-hop SNR) into a result dict."""
+    path_nodes = payload.get("path") or []
+    hops = [n for n in path_nodes if "hash" in n]
+    if not hops:
+        return {
+            "path_text": "direct (0 hops)",
+            "hops": 0,
+            "contact_name": contact.get("adv_name"),
+        }
+    path_text = " > ".join(
+        f"{n['hash']}@{n.get('snr'):.1f}dB" if n.get("snr") is not None else n["hash"]
+        for n in hops
+    )
+    return {
+        "path_text": path_text,
+        "hops": len(hops),
+        "contact_name": contact.get("adv_name"),
+    }
+
+
+def _redact_contact(contact: dict) -> dict:
+    """Copy of contact with potentially noisy/large fields dropped for logging."""
+    keep = (
+        "adv_name",
+        "public_key",
+        "type",
+        "flags",
+        "out_path_len",
+        "out_path",
+        "lastmod",
+    )
+    return {k: contact.get(k) for k in keep if k in contact}
+
+
+def _summarize_payload(payload) -> str:
+    """Short string representation of an event payload for logging."""
+    if payload is None:
+        return "None"
+    if isinstance(payload, dict):
+        parts = []
+        for k, v in payload.items():
+            if isinstance(v, (bytes, bytearray)):
+                parts.append(f"{k}=<bytes:{v.hex()}>")
+            elif isinstance(v, str) and len(v) > 80:
+                parts.append(f"{k}=<str:{len(v)}ch>")
+            elif isinstance(v, (list, dict)) and len(str(v)) > 120:
+                parts.append(f"{k}=<{type(v).__name__}:{len(v)}>")
+            else:
+                parts.append(f"{k}={v!r}")
+        return "{" + ", ".join(parts) + "}"
+    return repr(payload)
 
 
 def _build_result(out_path_len: int, out_path_hex: str, contact_name) -> dict[str, Any]:
