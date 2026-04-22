@@ -7,6 +7,7 @@ import json
 import logging
 import signal
 import uuid
+from typing import Any
 
 from meshbridge.bridge import Bridge
 from meshbridge.config import load_config
@@ -168,13 +169,18 @@ class App:
         )
 
     async def request_trace(
-        self, key_or_name: str, timeout: float = 30.0
+        self,
+        key_or_name: str,
+        timeout: float = 30.0,
+        inbound_path_len: int | None = None,
     ) -> dict:
         """Ask the bridge to run a path discovery and return the result.
 
         Publishes to ``outbound/trace_request``, awaits the matching
         ``inbound/trace_result/{corr_id}`` message. Returns a dict with
         either ``path_text``/``hops``/``contact_name`` on success or ``error``.
+        ``inbound_path_len`` is a best-effort fallback hop count (from the
+        triggering message) used when active discovery fails.
         """
         if not self._mqtt:
             return {"error": "mqtt not connected"}
@@ -184,11 +190,16 @@ class App:
         self._pending_traces[corr_id] = future
 
         prefix = self._config["mqtt"].get("topic_prefix", "meshbridge")
+        payload: dict[str, Any] = {
+            "corr_id": corr_id,
+            "key_or_name": key_or_name,
+            "timeout": timeout,
+        }
+        if inbound_path_len is not None:
+            payload["inbound_path_len"] = inbound_path_len
         await self._mqtt.publish(
             f"{prefix}/outbound/trace_request",
-            json.dumps(
-                {"corr_id": corr_id, "key_or_name": key_or_name, "timeout": timeout}
-            ),
+            json.dumps(payload),
         )
 
         try:

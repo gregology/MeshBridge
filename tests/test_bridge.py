@@ -319,10 +319,25 @@ async def test_outbound_direct_msg_no_contact_name(bridge):
 # -- Trace request handler tests --
 
 
-def _make_path_response_event(payload: dict):
+def _make_event(mc_type, payload: dict, attributes: dict | None = None):
     ev = MagicMock()
+    ev.type = mc_type
     ev.payload = payload
+    ev.attributes = attributes or {}
     return ev
+
+
+def _wait_for_selector(responses: dict):
+    """Build an AsyncMock side_effect that routes by event type.
+
+    ``responses`` maps MCEventType -> event object or None (for timeout).
+    Any type not in the dict returns None.
+    """
+
+    async def side_effect(event_type, attribute_filters=None, timeout=None):
+        return responses.get(event_type)
+
+    return side_effect
 
 
 @pytest.mark.asyncio
@@ -387,8 +402,10 @@ async def test_trace_request_cached_zero_hops(bridge):
 
 
 @pytest.mark.asyncio
-async def test_trace_request_discovers_when_no_cached_path(bridge):
-    """out_path_len of -1 falls back to active path discovery."""
+async def test_probe_path_response_fires(bridge):
+    """PATH_RESPONSE firing during the probe experiment returns formatted hops."""
+    from meshcore import EventType as MCEventType
+
     contact = {
         "public_key": "c" * 64,
         "adv_name": "Unknown",
@@ -397,8 +414,14 @@ async def test_trace_request_discovers_when_no_cached_path(bridge):
     }
     bridge._mc.get_contact_by_key_prefix.return_value = contact
     bridge._mc.wait_for_event = AsyncMock(
-        return_value=_make_path_response_event(
-            {"out_path_len": 2, "out_path": "1122"}
+        side_effect=_wait_for_selector(
+            {
+                MCEventType.PATH_RESPONSE: _make_event(
+                    MCEventType.PATH_RESPONSE, {"out_path_len": 2, "out_path": "1122"}
+                ),
+                MCEventType.PATH_UPDATE: None,
+                MCEventType.ADVERTISEMENT: None,
+            }
         )
     )
 
@@ -406,14 +429,55 @@ async def test_trace_request_discovers_when_no_cached_path(bridge):
     await bridge._on_trace_request("meshbridge/outbound/trace_request", payload)
 
     bridge._mc.commands.send_path_discovery.assert_awaited_once_with(contact)
+    bridge._mc.commands.send_statusreq.assert_awaited_once_with(contact)
     data = json.loads(bridge._mqtt.publish.await_args.args[1])
     assert data["path_text"] == "11 > 22"
     assert data["hops"] == 2
 
 
 @pytest.mark.asyncio
-async def test_trace_request_discovery_timeout(bridge):
-    """Discovery timeout when no cached path surfaces a clear error."""
+async def test_probe_path_update_refreshes_contact(bridge):
+    """PATH_UPDATE firing triggers contact refresh and returns the newly-cached path."""
+    from meshcore import EventType as MCEventType
+
+    stale = {
+        "public_key": "c" * 64,
+        "adv_name": "Learned",
+        "out_path_len": -1,
+        "out_path": "",
+    }
+    fresh = {
+        "public_key": "c" * 64,
+        "adv_name": "Learned",
+        "out_path_len": 3,
+        "out_path": "aabbcc",
+    }
+    # Initial lookup returns stale; after get_contacts refresh, returns fresh.
+    bridge._mc.get_contact_by_key_prefix.side_effect = [stale, fresh]
+    bridge._mc.wait_for_event = AsyncMock(
+        side_effect=_wait_for_selector(
+            {
+                MCEventType.PATH_RESPONSE: None,
+                MCEventType.PATH_UPDATE: _make_event(
+                    MCEventType.PATH_UPDATE, {"public_key": "c" * 64}
+                ),
+                MCEventType.ADVERTISEMENT: None,
+            }
+        )
+    )
+
+    payload = json.dumps({"corr_id": "c4", "key_or_name": "c" * 12}).encode()
+    await bridge._on_trace_request("meshbridge/outbound/trace_request", payload)
+
+    bridge._mc.commands.get_contacts.assert_awaited()
+    data = json.loads(bridge._mqtt.publish.await_args.args[1])
+    assert data["path_text"] == "aa > bb > cc"
+    assert data["hops"] == 3
+
+
+@pytest.mark.asyncio
+async def test_probe_timeout_without_fallback(bridge):
+    """All probes timing out with no inbound_path_len surfaces a clear error."""
     contact = {
         "public_key": "d" * 64,
         "adv_name": "Silent",
@@ -423,11 +487,33 @@ async def test_trace_request_discovery_timeout(bridge):
     bridge._mc.get_contact_by_key_prefix.return_value = contact
     bridge._mc.wait_for_event = AsyncMock(return_value=None)
 
-    payload = json.dumps({"corr_id": "c4", "key_or_name": "d" * 12}).encode()
+    payload = json.dumps({"corr_id": "c5", "key_or_name": "d" * 12}).encode()
     await bridge._on_trace_request("meshbridge/outbound/trace_request", payload)
 
     data = json.loads(bridge._mqtt.publish.await_args.args[1])
-    assert "discovery timed out" in data["error"]
+    assert data["error"] == "no cached path; discovery failed"
+
+
+@pytest.mark.asyncio
+async def test_probe_timeout_with_inbound_fallback(bridge):
+    """All probes timing out but inbound_path_len known reports hop count fallback."""
+    contact = {
+        "public_key": "e" * 64,
+        "adv_name": "Flood",
+        "out_path_len": -1,
+        "out_path": "",
+    }
+    bridge._mc.get_contact_by_key_prefix.return_value = contact
+    bridge._mc.wait_for_event = AsyncMock(return_value=None)
+
+    payload = json.dumps(
+        {"corr_id": "c6", "key_or_name": "e" * 12, "inbound_path_len": 4}
+    ).encode()
+    await bridge._on_trace_request("meshbridge/outbound/trace_request", payload)
+
+    data = json.loads(bridge._mqtt.publish.await_args.args[1])
+    assert data["path_text"] == "~4 hops inbound (no return path)"
+    assert data["hops"] == 4
 
 
 @pytest.mark.asyncio
@@ -462,7 +548,7 @@ async def test_trace_request_falls_back_to_name_lookup(bridge):
     bridge._mc.get_contact_by_key_prefix.return_value = None
     bridge._mc.get_contact_by_name.return_value = contact
 
-    payload = json.dumps({"corr_id": "c6", "key_or_name": "ByName"}).encode()
+    payload = json.dumps({"corr_id": "c7", "key_or_name": "ByName"}).encode()
     await bridge._on_trace_request("meshbridge/outbound/trace_request", payload)
 
     bridge._mc.get_contact_by_name.assert_called_with("ByName")

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import Any
@@ -267,9 +268,7 @@ class Bridge:
     async def _on_trace_request(self, topic: str, payload: bytes) -> None:
         """Handle a trace request from a plugin.
 
-        Issues a path discovery to the target contact, awaits the meshcore
-        PATH_RESPONSE, and publishes the formatted path back on
-        ``inbound/trace_result/{corr_id}``.
+        Publishes the formatted path back on ``inbound/trace_result/{corr_id}``.
         """
         corr_id = ""
         try:
@@ -277,23 +276,33 @@ class Bridge:
             corr_id = data["corr_id"]
             key_or_name = data.get("key_or_name") or ""
             timeout = float(data.get("timeout", 30.0))
+            inbound_path_len = data.get("inbound_path_len")
+            if inbound_path_len is not None:
+                inbound_path_len = int(inbound_path_len)
         except (json.JSONDecodeError, KeyError, ValueError):
             logger.exception("Malformed trace_request payload")
             return
 
-        result = await self._run_trace(key_or_name, timeout)
+        result = await self._run_trace(key_or_name, timeout, inbound_path_len)
         result["corr_id"] = corr_id
         await self._mqtt.publish(
             f"{self._topic_prefix}/inbound/trace_result/{corr_id}",
             json.dumps(result),
         )
 
-    async def _run_trace(self, key_or_name: str, timeout: float) -> dict[str, Any]:
+    async def _run_trace(
+        self,
+        key_or_name: str,
+        timeout: float,
+        inbound_path_len: int | None = None,
+    ) -> dict[str, Any]:
         """Resolve a contact and return a formatted trace result dict.
 
-        Uses the contact's cached ``out_path`` (populated by the firmware and
-        refreshed on advertisements/path-updates). Falls back to an active
-        path discovery only when no path is cached (``out_path_len == -1``).
+        Order of preference:
+        1. Cached ``out_path`` on the contact record (instant).
+        2. Probe experiment: race PATH_RESPONSE, PATH_UPDATE, ADVERTISEMENT
+           against two probes (path_discovery + statusreq).
+        3. Fallback: report ``inbound_path_len`` hop count if we have it.
         """
         if not self._mc:
             return {"error": "bridge not connected"}
@@ -302,45 +311,176 @@ class Bridge:
         if not contact:
             # Refresh the contact cache and retry once in case the sender
             # advertised after startup.
+            logger.info("Trace lookup '%s': cache miss, refreshing contacts", key_or_name)
             try:
                 await self._mc.commands.get_contacts()
             except Exception:
                 logger.exception("Failed to refresh contacts for trace lookup")
             contact = self._resolve_contact(key_or_name)
         if not contact:
+            logger.info("Trace lookup '%s': contact still not found after refresh", key_or_name)
             return {"error": f"unknown contact '{key_or_name}'"}
 
         out_path_len = int(contact.get("out_path_len", -1))
+        public_key = contact.get("public_key", "") or ""
         logger.info(
-            "Trace lookup for '%s': cached out_path_len=%d",
+            "Trace lookup '%s': pubkey=%s out_path_len=%d inbound_path_len=%s",
             contact.get("adv_name"),
+            public_key[:16],
             out_path_len,
+            inbound_path_len,
         )
 
         if out_path_len >= 0:
+            logger.info(
+                "Using cached path for '%s': %s",
+                contact.get("adv_name"),
+                contact.get("out_path"),
+            )
             return _format_cached_path(contact)
 
-        # No cached path: try active discovery as a fallback.
-        public_key = contact.get("public_key", "")
         if len(public_key) < 12:
             return {"error": "contact missing public key"}
+
+        probe_result = await self._probe_path(contact, timeout)
+        if probe_result is not None:
+            return probe_result
+
+        # All probes exhausted. Fall back to inbound hop count if known.
+        if inbound_path_len is not None and inbound_path_len > 0:
+            logger.info(
+                "Probe experiment exhausted; falling back to inbound_path_len=%d",
+                inbound_path_len,
+            )
+            return {
+                "path_text": f"~{inbound_path_len} hops inbound (no return path)",
+                "hops": inbound_path_len,
+                "contact_name": contact.get("adv_name"),
+            }
+
+        return {"error": "no cached path; discovery failed"}
+
+    async def _probe_path(self, contact: dict, timeout: float) -> dict | None:
+        """Race multiple discovery mechanisms to learn a path for ``contact``.
+
+        Starts wait_for_event listeners for PATH_RESPONSE, PATH_UPDATE, and
+        ADVERTISEMENT (all filtered to this contact), then fires both
+        ``send_path_discovery`` and ``send_statusreq`` probes. Returns a
+        formatted result dict if any listener produces a usable path, or
+        None on overall timeout.
+        """
+        mc = self._mc
+        if mc is None:
+            return None
+
+        public_key = contact["public_key"]
         pubkey_pre = public_key[:12]
+        adv_name = contact.get("adv_name")
+
+        # Create listeners BEFORE sending probes so no event is missed.
+        response_task = asyncio.create_task(
+            mc.wait_for_event(
+                MCEventType.PATH_RESPONSE,
+                attribute_filters={"pubkey_pre": pubkey_pre},
+                timeout=timeout,
+            ),
+            name="wait_path_response",
+        )
+        update_task = asyncio.create_task(
+            mc.wait_for_event(
+                MCEventType.PATH_UPDATE,
+                attribute_filters={"public_key": public_key},
+                timeout=timeout,
+            ),
+            name="wait_path_update",
+        )
+        advert_task = asyncio.create_task(
+            mc.wait_for_event(
+                MCEventType.ADVERTISEMENT,
+                attribute_filters={"public_key": public_key},
+                timeout=timeout,
+            ),
+            name="wait_advertisement",
+        )
+        listeners = [response_task, update_task, advert_task]
+
+        logger.info(
+            "Probe experiment for '%s' pubkey=%s: firing path_discovery + "
+            "statusreq, listeners armed for PATH_RESPONSE|PATH_UPDATE|ADVERTISEMENT "
+            "(timeout=%.1fs)",
+            adv_name,
+            public_key[:16],
+            timeout,
+        )
 
         try:
-            await self._mc.commands.send_path_discovery(contact)
-        except Exception as exc:
+            send_result = await mc.commands.send_path_discovery(contact)
+            logger.info("send_path_discovery result: type=%s", getattr(send_result, "type", None))
+        except Exception:
             logger.exception("send_path_discovery failed")
-            return {"error": f"path discovery failed: {exc}"}
 
-        event = await self._mc.wait_for_event(
-            MCEventType.PATH_RESPONSE,
-            attribute_filters={"pubkey_pre": pubkey_pre},
-            timeout=timeout,
+        try:
+            stat_result = await mc.commands.send_statusreq(contact)
+            logger.info("send_statusreq result: type=%s", getattr(stat_result, "type", None))
+        except Exception:
+            logger.exception("send_statusreq failed")
+
+        try:
+            done, pending = await asyncio.wait(
+                listeners, return_when=asyncio.FIRST_COMPLETED
+            )
+        finally:
+            for task in listeners:
+                if not task.done():
+                    task.cancel()
+
+        for task in done:
+            if task.cancelled():
+                continue
+            try:
+                event = task.result()
+            except Exception:
+                logger.exception("Listener %s raised", task.get_name())
+                continue
+            if event is None:
+                logger.info("Listener %s timed out", task.get_name())
+                continue
+
+            mc_type = getattr(event, "type", None)
+            attrs = getattr(event, "attributes", None)
+            logger.info(
+                "Probe listener %s fired: type=%s attributes=%s",
+                task.get_name(),
+                mc_type,
+                attrs,
+            )
+
+            if mc_type == MCEventType.PATH_RESPONSE:
+                return _format_trace_payload(event.payload, contact)
+
+            # PATH_UPDATE/ADVERTISEMENT don't carry the path directly. Refresh
+            # the contact cache to pick up any newly-learned out_path.
+            try:
+                await mc.commands.get_contacts()
+            except Exception:
+                logger.exception("get_contacts after %s failed", mc_type)
+
+            refreshed = self._resolve_contact(public_key[:12]) or contact
+            refreshed_len = int(refreshed.get("out_path_len", -1))
+            logger.info(
+                "After %s, contact '%s' out_path_len=%d out_path=%s",
+                mc_type,
+                adv_name,
+                refreshed_len,
+                refreshed.get("out_path"),
+            )
+            if refreshed_len >= 0:
+                return _format_cached_path(refreshed)
+
+        logger.info(
+            "Probe experiment for '%s' exhausted with no usable result", adv_name
         )
-        if event is None:
-            return {"error": "no cached path; discovery timed out"}
-
-        return _format_trace_payload(event.payload, contact)
+        return None
 
 
 def _format_cached_path(contact: dict) -> dict[str, Any]:

@@ -74,9 +74,16 @@ class BasePlugin(ABC):
             contact_key=contact_key,
         )
 
-    async def request_trace(self, key_or_name: str, timeout: float = 30.0) -> dict:
+    async def request_trace(
+        self,
+        key_or_name: str,
+        timeout: float = 30.0,
+        inbound_path_len: int | None = None,
+    ) -> dict:
         """Run a path discovery against a contact via the bridge."""
-        return await self._app.request_trace(key_or_name, timeout=timeout)
+        return await self._app.request_trace(
+            key_or_name, timeout=timeout, inbound_path_len=inbound_path_len
+        )
 
     @property
     def config(self) -> dict:

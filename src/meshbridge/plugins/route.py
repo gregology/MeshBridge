@@ -57,7 +57,11 @@ class RoutePlugin(BasePlugin):
                 "Route query from %s on ch%d", event.sender_name, channel
             )
 
-        result = await self.request_trace(key_or_name, timeout=self._timeout)
+        result = await self.request_trace(
+            key_or_name,
+            timeout=self._timeout,
+            inbound_path_len=event.path_len,
+        )
         reply = _format_reply(result)
 
         if event.event_type == EventType.CONTACT_MESSAGE:
