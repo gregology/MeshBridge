@@ -436,44 +436,97 @@ async def test_probe_path_response_fires(bridge):
 
 
 @pytest.mark.asyncio
-async def test_probe_trace_data_fires(bridge):
-    """TRACE_DATA firing returns hop hashes with per-hop SNRs."""
+async def test_probe_ack_fires_and_refreshes_contact(bridge):
+    """ACK firing (diagnostic) triggers a contact refresh and returns new path."""
+    from meshcore import EventType as MCEventType
+
+    stale = {
+        "public_key": "c" * 64,
+        "adv_name": "AckedNode",
+        "out_path_len": -1,
+        "out_path": "",
+    }
+    fresh = {
+        "public_key": "c" * 64,
+        "adv_name": "AckedNode",
+        "out_path_len": 2,
+        "out_path": "2233",
+    }
+    bridge._mc.get_contact_by_key_prefix.side_effect = [stale, fresh]
+
+    # send_path_discovery returns MSG_SENT with an expected_ack.
+    msg_sent = _make_event(
+        MCEventType.MSG_SENT,
+        {"type": 1, "expected_ack": b"\x80|\xa8f", "suggested_timeout": 2724},
+    )
+    bridge._mc.commands.send_path_discovery = AsyncMock(return_value=msg_sent)
+    # send_statusreq returns no expected_ack (so no second ACK listener).
+    bridge._mc.commands.send_statusreq = AsyncMock(
+        return_value=_make_event(MCEventType.MSG_SENT, {"type": 1})
+    )
+
+    ack_code = b"\x80|\xa8f".hex()
+    responses: dict = {
+        MCEventType.PATH_RESPONSE: None,
+        MCEventType.PATH_UPDATE: None,
+        MCEventType.ADVERTISEMENT: None,
+    }
+
+    async def wait_side_effect(event_type, attribute_filters=None, timeout=None):
+        if event_type == MCEventType.ACK and attribute_filters == {"code": ack_code}:
+            return _make_event(
+                MCEventType.ACK, {"code": ack_code}, {"code": ack_code}
+            )
+        return responses.get(event_type)
+
+    bridge._mc.wait_for_event = AsyncMock(side_effect=wait_side_effect)
+
+    payload = json.dumps({"corr_id": "ack1", "key_or_name": "c" * 12}).encode()
+    await bridge._on_trace_request("meshbridge/outbound/trace_request", payload)
+
+    bridge._mc.commands.get_contacts.assert_awaited()
+    data = json.loads(bridge._mqtt.publish.await_args.args[1])
+    assert data["path_text"] == "22 > 33"
+    assert data["hops"] == 2
+
+
+@pytest.mark.asyncio
+async def test_probe_no_ack_listener_when_no_expected_ack(bridge):
+    """If MSG_SENT has no expected_ack, no ACK listener is armed for that probe."""
     from meshcore import EventType as MCEventType
 
     contact = {
-        "public_key": "c" * 64,
-        "adv_name": "TracedNode",
+        "public_key": "e" * 64,
+        "adv_name": "NoAck",
         "out_path_len": -1,
         "out_path": "",
     }
     bridge._mc.get_contact_by_key_prefix.return_value = contact
-    bridge._mc.wait_for_event = AsyncMock(
-        side_effect=_wait_for_selector(
-            {
-                MCEventType.PATH_RESPONSE: None,
-                MCEventType.PATH_UPDATE: None,
-                MCEventType.ADVERTISEMENT: None,
-                MCEventType.TRACE_DATA: _make_event(
-                    MCEventType.TRACE_DATA,
-                    {
-                        "path": [
-                            {"hash": "ab", "snr": -6.0},
-                            {"hash": "cd", "snr": -12.5},
-                            {"snr": -4.25},  # final node (us), no hash
-                        ]
-                    },
-                ),
-            }
-        )
+    bridge._mc.commands.send_path_discovery = AsyncMock(
+        return_value=_make_event(MCEventType.MSG_SENT, {"type": 1})
+    )
+    bridge._mc.commands.send_statusreq = AsyncMock(
+        return_value=_make_event(MCEventType.MSG_SENT, {"type": 1})
     )
 
-    payload = json.dumps({"corr_id": "tr1", "key_or_name": "c" * 12}).encode()
+    event_types_waited: list = []
+
+    async def wait_side_effect(event_type, attribute_filters=None, timeout=None):
+        event_types_waited.append(event_type)
+        return None
+
+    bridge._mc.wait_for_event = AsyncMock(side_effect=wait_side_effect)
+
+    payload = json.dumps(
+        {"corr_id": "noack", "key_or_name": "e" * 12, "inbound_path_len": 4}
+    ).encode()
     await bridge._on_trace_request("meshbridge/outbound/trace_request", payload)
 
-    bridge._mc.commands.send_trace.assert_awaited_once()
+    # No ACK listener should have been armed.
+    assert MCEventType.ACK not in event_types_waited
+    # Falls back to inbound hop count.
     data = json.loads(bridge._mqtt.publish.await_args.args[1])
-    assert data["path_text"] == "ab@-6.0dB > cd@-12.5dB"
-    assert data["hops"] == 2
+    assert data["path_text"] == "~4 hops inbound (no return path)"
 
 
 @pytest.mark.asyncio

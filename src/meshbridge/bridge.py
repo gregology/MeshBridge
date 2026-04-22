@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import random
 import time
 from typing import Any
 
@@ -365,11 +364,17 @@ class Bridge:
     async def _probe_path(self, contact: dict, timeout: float) -> dict | None:
         """Race multiple discovery mechanisms to learn a path for ``contact``.
 
-        Listeners (all filtered to this contact / our trace tag):
-            PATH_RESPONSE, PATH_UPDATE, ADVERTISEMENT, TRACE_DATA
+        Listeners (all filtered to this contact):
+            PATH_RESPONSE, PATH_UPDATE, ADVERTISEMENT,
+            plus one ACK listener per probe (filtered by expected_ack code).
 
         Probes fired in parallel:
-            send_path_discovery, send_statusreq, send_trace (no path, random tag)
+            send_path_discovery, send_statusreq
+
+        The per-probe ACK listeners are our diagnostic instrument: an ACK
+        firing proves the remote received and processed our probe packet,
+        even when no PATH_*/STATUS_* response follows. No ACK means the
+        probe never reached the remote (or their firmware silently drops it).
 
         Also installs a broad "observe" subscription for the probe window so
         every meshcore event we hear gets logged for debugging.
@@ -384,14 +389,12 @@ class Bridge:
         public_key = contact["public_key"]
         pubkey_pre = public_key[:12]
         adv_name = contact.get("adv_name")
-        trace_tag = random.randint(1, 0xFFFFFFFF)
 
         logger.info(
-            "=== Probe experiment START name='%s' pubkey=%s timeout=%.1fs trace_tag=0x%08x ===",
+            "=== Probe experiment START name='%s' pubkey=%s timeout=%.1fs ===",
             adv_name,
             public_key,
             timeout,
-            trace_tag,
         )
         logger.info("Contact record: %s", _redact_contact(contact))
 
@@ -424,28 +427,18 @@ class Bridge:
             ),
             name="wait_advertisement",
         )
-        trace_task = asyncio.create_task(
-            mc.wait_for_event(
-                MCEventType.TRACE_DATA,
-                attribute_filters={"tag": trace_tag},
-                timeout=timeout,
-            ),
-            name="wait_trace_data",
-        )
-        listeners = [response_task, update_task, advert_task, trace_task]
+        listeners = [response_task, update_task, advert_task]
         logger.info(
-            "Listeners armed: PATH_RESPONSE[pubkey_pre=%s] PATH_UPDATE[public_key=%s] "
-            "ADVERTISEMENT[public_key=%s] TRACE_DATA[tag=0x%08x]",
+            "Path listeners armed: PATH_RESPONSE[pubkey_pre=%s] "
+            "PATH_UPDATE[public_key=%s] ADVERTISEMENT[public_key=%s]",
             pubkey_pre,
             public_key,
             public_key,
-            trace_tag,
         )
 
         probes = [
             ("send_path_discovery", lambda: mc.commands.send_path_discovery(contact)),
             ("send_statusreq", lambda: mc.commands.send_statusreq(contact)),
-            ("send_trace", lambda: mc.commands.send_trace(tag=trace_tag)),
         ]
 
         t_start = time.monotonic()
@@ -464,6 +457,24 @@ class Bridge:
                 )
             except Exception:
                 logger.exception("Probe %s raised", name)
+                continue
+
+            # If the probe produced an expected_ack, arm a listener for the
+            # matching ACK so we can tell "remote received" from "remote mute".
+            ack_code = _extract_ack_code(result)
+            if ack_code:
+                ack_task = asyncio.create_task(
+                    mc.wait_for_event(
+                        MCEventType.ACK,
+                        attribute_filters={"code": ack_code},
+                        timeout=timeout,
+                    ),
+                    name=f"wait_ack_{name}",
+                )
+                listeners.append(ack_task)
+                logger.info(
+                    "ACK listener armed for probe %s: code=%s", name, ack_code
+                )
 
         try:
             done, pending = await asyncio.wait(
@@ -515,13 +526,8 @@ class Bridge:
                 logger.info("Resolved via PATH_RESPONSE: %s", result)
                 continue
 
-            if mc_type == MCEventType.TRACE_DATA:
-                result = _format_trace_data(payload or {}, contact)
-                logger.info("Resolved via TRACE_DATA: %s", result)
-                continue
-
-            # PATH_UPDATE / ADVERTISEMENT don't carry path directly. Refresh
-            # the contact cache to pick up any newly-learned out_path.
+            # PATH_UPDATE / ADVERTISEMENT / ACK don't carry path inline.
+            # Refresh the contact cache to pick up any newly-learned out_path.
             try:
                 await mc.commands.get_contacts()
             except Exception:
@@ -538,7 +544,7 @@ class Bridge:
             )
             if refreshed_len >= 0:
                 result = _format_cached_path(refreshed)
-                logger.info("Resolved via cache refresh: %s", result)
+                logger.info("Resolved via cache refresh after %s: %s", mc_type, result)
 
         if result is None:
             logger.info("=== Probe experiment END name='%s' NO RESULT ===", adv_name)
@@ -574,25 +580,17 @@ def _format_trace_payload(payload: dict, contact: dict) -> dict[str, Any]:
     return _build_result(out_path_len, out_path_hex, contact.get("adv_name"))
 
 
-def _format_trace_data(payload: dict, contact: dict) -> dict[str, Any]:
-    """Format a TRACE_DATA payload (hop hashes + per-hop SNR) into a result dict."""
-    path_nodes = payload.get("path") or []
-    hops = [n for n in path_nodes if "hash" in n]
-    if not hops:
-        return {
-            "path_text": "direct (0 hops)",
-            "hops": 0,
-            "contact_name": contact.get("adv_name"),
-        }
-    path_text = " > ".join(
-        f"{n['hash']}@{n.get('snr'):.1f}dB" if n.get("snr") is not None else n["hash"]
-        for n in hops
-    )
-    return {
-        "path_text": path_text,
-        "hops": len(hops),
-        "contact_name": contact.get("adv_name"),
-    }
+def _extract_ack_code(msg_sent_event) -> str | None:
+    """Pull the ``expected_ack`` hex code from a MSG_SENT event, if present."""
+    payload = getattr(msg_sent_event, "payload", None)
+    if not isinstance(payload, dict):
+        return None
+    exp = payload.get("expected_ack")
+    if isinstance(exp, (bytes, bytearray)):
+        return exp.hex()
+    if isinstance(exp, str) and exp:
+        return exp
+    return None
 
 
 def _redact_contact(contact: dict) -> dict:
